@@ -62,25 +62,27 @@ class Actor_Critic(keras.Model):
         #                                           padding='same',
         #                                           activation=tf.nn.relu)
         # core
-        self.flat = keras.layers.Flatten()
+        self.flat = keras.layers.Flatten(name="core_flatten")
         """
         Output
         """
         # TODO: autoregressive embedding
-        self.action_id_layer = keras.layers.Dense(256)
+        self.action_id_layer = keras.layers.Dense(256, name="action_id_out")
         self.action_id_gate = GLU(input_size=256, out_size=NUM_ACTION_FUNCTIONS)
-        self.delay_logits = keras.layers.Dense(128)
-        self.queued_logits = keras.layers.Dense(2)
-        self.select_point_logits = keras.layers.Dense(4)
-        self.select_add_logits = keras.layers.Dense(2)
+        # self.delay_logits = keras.layers.Dense(128, name="delay_out")
+        self.queued_logits = keras.layers.Dense(2, name="queued_out")
+        self.select_point_logits = keras.layers.Dense(4, name="select_point_out")
+        self.select_add_logits = keras.layers.Dense(2, name="select_add_out")
         # self.select_unit_act=keras.layers.Dense(4)
         # self.selec_unit_id_logits=keras.layers.Dense(64)
-        self.select_worker_logits = keras.layers.Dense(4)
-        self.target_unit_logits = keras.layers.Dense(32)
-        self.target_location_flat = keras.layers.Flatten()
-        self.target_location_logits = keras.layers.Conv2D(1, 1, padding="same")
+        self.select_worker_logits = keras.layers.Dense(4, name="select_worker_out")
+        # self.target_unit_logits = keras.layers.Dense(32, name="target_unit_out")
+        self.target_location_flat = keras.layers.Flatten(name="target_location_flatten")
+        self.target_location_logits = keras.layers.Conv2D(
+            1, 1, padding="same", name="target_location_out"
+        )
 
-        self.value = keras.layers.Dense(1)
+        # self.value = keras.layers.Dense(1, name="value_out")
 
     def set_act_spec(self, action_spec):
         self.action_spec = action_spec
@@ -141,8 +143,6 @@ class Actor_Critic(keras.Model):
         # embed_screen = self.embed_screen_2(embed_screen)
         # embed_screen = self.embed_screen_3(embed_screen)
         # map_out = tf.concat([embed_minimap, embed_screen], axis=-1)
-        map_out = embed_minimap
-        # print("map_out: {}".format(map_out.shape))
 
         # TODO: entities feature
         """
@@ -151,20 +151,20 @@ class Actor_Critic(keras.Model):
         # core
         scalar_out_2d = tf.tile(
             tf.expand_dims(tf.expand_dims(scalar_out, 1), 2),
-            [1, map_out.shape[1], map_out.shape[2], 1],
+            [1, embed_minimap.shape[1], embed_minimap.shape[2], 1],
         )
-        core_out = tf.concat([scalar_out_2d, map_out], axis=3)
+        core_out = tf.concat([scalar_out_2d, embed_minimap], axis=3, name="core")
         core_out_flat = self.flat(core_out)
         """
         Decision output
         """
         # value
-        value_out = self.value(core_out_flat)
+        # value_out = self.value(core_out_flat)
         # action id
         action_id_out = self.action_id_layer(core_out_flat)
         action_id_out = self.action_id_gate(action_id_out, embed_available_act)
         # delay
-        delay_out = self.delay_logits(core_out_flat)
+        # delay_out = self.delay_logits(core_out_flat)
 
         # queued
         queued_out = self.queued_logits(core_out_flat)
@@ -175,7 +175,7 @@ class Actor_Critic(keras.Model):
 
         select_worker_out = self.select_worker_logits(core_out_flat)
         # target unit
-        target_unit_out = self.target_unit_logits(core_out_flat)
+        # target_unit_out = self.target_unit_logits(core_out_flat)
         # target location
         target_location_out = self.target_location_logits(core_out)
         (
@@ -188,14 +188,12 @@ class Actor_Critic(keras.Model):
         target_location_out = self.target_location_flat(target_location_out)
 
         out = {
-            "value": value_out,
+            # "value": value_out,
             "action_id": action_id_out,
-            "delay": delay_out,
             "queued": queued_out,
             "select_point_act": select_point_out,
             "select_add": select_add_out,
             "select_worker": select_worker_out,
-            "target_unit": target_unit_out,
             "target_location": target_location_out,
         }
 
@@ -249,7 +247,6 @@ class Actor_Critic(keras.Model):
                 )
 
         return (
-            out["value"],
             action_id,
             arg_spatial,
             arg_nonspatial,

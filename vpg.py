@@ -104,7 +104,7 @@ def translateActionToSC2(arg_spatial, arg_nonspatial, width, height):
 # run one policy update
 def train(env_name, batch_size, epochs):
     actor_critic = Actor_Critic()
-    optimizer = keras.optimizers.Adam()
+    optimizer = keras.optimizers.Adam(learning_rate=0.0001)
 
     # set env
     with SC2EnvWrapper(
@@ -140,9 +140,7 @@ def train(env_name, batch_size, epochs):
                     for each_obs in obs
                 )
                 # print("computing action ...")
-                v, act_id, arg_spatial, arg_nonspatial, logp_a = actor_critic.step(
-                    *tf_obs
-                )
+                act_id, arg_spatial, arg_nonspatial, logp_a = actor_critic.step(*tf_obs)
 
                 sc2act_args = translateActionToSC2(arg_spatial, arg_nonspatial, 32, 32)
 
