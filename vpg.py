@@ -458,7 +458,7 @@ def train(env_name, batch_size, epochs):
         action_spec = env.action_spec()[0]  # assume one agent
         actor_critic.set_act_spec(action_spec)
 
-        def train_one_epoch():
+        def train_one_epoch(tracing_on):
             # initialize replay buffer
             buffer = Buffer(32, 32)
 
@@ -552,6 +552,10 @@ def train(env_name, batch_size, epochs):
                 act_mask,
                 ret,
             ) = buffer.sample()
+
+            if tracing_on:
+                tf.summary.trace_on(graph=True, profiler=True)
+
             batch_loss = train_step(
                 player,
                 home_away_race,
@@ -565,10 +569,20 @@ def train(env_name, batch_size, epochs):
                 buffer.size(),
             )
 
+            if tracing_on:
+                with train_summary_writer.as_default():
+                    tf.summary.trace_export(
+                        name="train_step", step=0, profiler_outdir=train_log_dir
+                    )
+
             return batch_loss, buffer.batch_ret, buffer.batch_len
 
         for i in range(epochs):
-            batch_loss, batch_ret, batch_len = train_one_epoch()
+            if i == 0:
+                tracing_on = True
+            else:
+                tracing_on = False
+            batch_loss, batch_ret, batch_len = train_one_epoch(tracing_on)
             with train_summary_writer.as_default():
                 tf.summary.scalar("batch_ret", np.mean(batch_ret), step=i)
                 tf.summary.scalar("batch_len", np.mean(batch_len), step=i)
@@ -581,7 +595,7 @@ def train(env_name, batch_size, epochs):
 
 
 def main(argv):
-    epochs = 500
+    epochs = 2
     batch_size = 100
     train(FLAGS.env_name, batch_size, epochs)
 
