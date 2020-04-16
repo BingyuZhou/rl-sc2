@@ -7,6 +7,7 @@ from pysc2.lib import features, actions
 """ constants"""
 NUM_ACTION_FUNCTIONS = 573
 EPS = 1e-8
+MINIMAP_RES = 32
 
 
 class GLU(keras.Model):
@@ -275,7 +276,9 @@ class Actor_Critic(keras.Model):
                 logp_args.append(
                     tf.reduce_sum(
                         logp_pi["target_location"]
-                        * tf.one_hot(action_args[:, ind], depth=32 * 32),
+                        * tf.one_hot(
+                            action_args[:, ind], depth=MINIMAP_RES * MINIMAP_RES
+                        ),
                         axis=-1,
                     )
                 )

@@ -29,6 +29,7 @@ test_summary_writer = tf.summary.create_file_writer(test_log_dir)
 """ constants"""
 NUM_ACTION_FUNCTIONS = 573
 EPS = 1e-8
+MINIMAP_RES = 32
 
 # args
 FLAGS = flags.FLAGS
@@ -104,14 +105,14 @@ def translateActionToSC2(arg_spatial, arg_nonspatial, width, height):
 # run one policy update
 def train(env_name, batch_size, epochs):
     actor_critic = Actor_Critic()
-    optimizer = keras.optimizers.Adam(learning_rate=0.0001)
+    optimizer = keras.optimizers.Adam(learning_rate=0.0003)
 
     # set env
     with SC2EnvWrapper(
         map_name=env_name,
         players=[sc2_env.Agent(sc2_env.Race.random)],
         agent_interface_format=sc2_env.parse_agent_interface_format(
-            feature_minimap=32, feature_screen=1
+            feature_minimap=MINIMAP_RES, feature_screen=1
         ),
         step_mul=FLAGS.step_mul,
         game_steps_per_episode=FLAGS.game_steps_per_episode,
@@ -123,7 +124,7 @@ def train(env_name, batch_size, epochs):
 
         def train_one_epoch(tracing_on):
             # initialize replay buffer
-            buffer = Buffer(32, 32)
+            buffer = Buffer(MINIMAP_RES, MINIMAP_RES)
 
             # initial observation
             timeStepTuple = env.reset()
@@ -142,7 +143,9 @@ def train(env_name, batch_size, epochs):
                 # print("computing action ...")
                 act_id, arg_spatial, arg_nonspatial, logp_a = actor_critic.step(*tf_obs)
 
-                sc2act_args = translateActionToSC2(arg_spatial, arg_nonspatial, 32, 32)
+                sc2act_args = translateActionToSC2(
+                    arg_spatial, arg_nonspatial, MINIMAP_RES, MINIMAP_RES
+                )
 
                 # print("buffer logging ...")
                 act_mask = get_mask(act_id.numpy().item(), action_spec)
@@ -215,7 +218,7 @@ def train(env_name, batch_size, epochs):
             ) = buffer.sample()
 
             if tracing_on:
-                tf.summary.trace_on(graph=True, profiler=True)
+                tf.summary.trace_on(graph=True, profiler=False)
 
             batch_loss = train_step(
                 player,
@@ -232,9 +235,7 @@ def train(env_name, batch_size, epochs):
 
             if tracing_on:
                 with train_summary_writer.as_default():
-                    tf.summary.trace_export(
-                        name="train_step", step=0, profiler_outdir=train_log_dir
-                    )
+                    tf.summary.trace_export(name="train_step", step=0)
 
             return batch_loss, buffer.batch_ret, buffer.batch_len
 
@@ -247,17 +248,19 @@ def train(env_name, batch_size, epochs):
             with train_summary_writer.as_default():
                 tf.summary.scalar("batch_ret", np.mean(batch_ret), step=i)
                 tf.summary.scalar("batch_len", np.mean(batch_len), step=i)
-
+                tf.summary.scalar("batch_loss", batch_loss.numpy(), step=i)
+            print("----------------------------")
             print(
                 "epoch {0:2d} loss {1:.3f} batch_ret {2:.3f} batch_len {3:.3f}".format(
                     i, batch_loss.numpy(), np.mean(batch_ret), np.mean(batch_len)
                 )
             )
+            print("----------------------------")
 
 
 def main(argv):
-    epochs = 2
-    batch_size = 100
+    epochs = 100
+    batch_size = 128
     train(FLAGS.env_name, batch_size, epochs)
 
 
