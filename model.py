@@ -1,13 +1,10 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
+from utils import indToXY, XYToInd
+from constants import *
 
 from pysc2.lib import features, actions
-
-""" constants"""
-NUM_ACTION_FUNCTIONS = 573
-EPS = 1e-8
-MINIMAP_RES = 32
 
 
 class GLU(keras.Model):
@@ -252,7 +249,7 @@ class Actor_Critic(keras.Model):
             logp_a,
         )
 
-    def logp_a(self, action_ids, action_args, action_mask, pi, action_spec):
+    def logp_a(self, action_ids, action_args, action_mask, pi):
         """logp(a|s)"""
         # from logits to logp
         logp_pi = {}
@@ -305,16 +302,14 @@ class Actor_Critic(keras.Model):
         upgrades,
         available_act,
         minimap,
-        batch_size,
         act_id,
         act_args,
         act_mask,
         ret,
-        action_spec,
     ):
         # expection grad log
         out = self.call(player, home_away_race, upgrades, available_act, minimap)
 
-        logp = self.logp_a(act_id, act_args, act_mask, out, action_spec)
+        logp = self.logp_a(act_id, act_args, act_mask, out)
 
         return -tf.reduce_mean(logp * ret)

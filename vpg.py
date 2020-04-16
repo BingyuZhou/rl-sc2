@@ -5,6 +5,8 @@ from __future__ import print_function
 
 from buffer import Buffer
 from model import Actor_Critic
+from utils import indToXY, XYToInd
+from constants import *
 
 import tensorflow as tf
 from tensorflow import keras
@@ -26,10 +28,7 @@ train_log_dir = "logs/" + current_time + "/train"
 test_log_dir = "logs/" + current_time + "/test"
 train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 test_summary_writer = tf.summary.create_file_writer(test_log_dir)
-""" constants"""
-NUM_ACTION_FUNCTIONS = 573
-EPS = 1e-8
-MINIMAP_RES = 32
+
 
 # args
 FLAGS = flags.FLAGS
@@ -43,18 +42,6 @@ flags.DEFINE_enum(
 )
 flags.DEFINE_integer("game_steps_per_episode", None, "Game steps per episode.")
 flags.DEFINE_bool("disable_fog", False, "Whether to disable Fog of War.")
-
-
-def indToXY(id, width, height):
-    """Index to (x,y) location"""
-    # Observation map is y-major coordinate
-    y, x = id % width, id // width
-    return [x, y]
-
-
-def XYToInd(location, width, height):
-    """Location (x,y) to index"""
-    return location[0] * width + location[1]
 
 
 def preprocess(obs):
@@ -128,19 +115,17 @@ def train(env_name, batch_size, epochs):
             buffer = Buffer(MINIMAP_RES, MINIMAP_RES)
 
             # initial observation
-            timeStepTuple = env.reset()
-            step_type, reward, discount, obs = timeStepTuple[0]
+            timestep = env.reset()
+            step_type, reward, discount, obs = timestep[0]
             obs = preprocess(obs)
-            # render first episode of each epoch
-            render_env = True
 
             # fill in recorded trajectories
             while True:
-                env.render(render_env)
                 tf_obs = (
                     tf.constant(each_obs, shape=(1, *each_obs.shape))
                     for each_obs in obs
                 )
+
                 # print("computing action ...")
                 act_id, arg_spatial, arg_nonspatial, logp_a = actor_critic.step(*tf_obs)
 
@@ -154,24 +139,22 @@ def train(env_name, batch_size, epochs):
                     *obs, act_id.numpy().item(), sc2act_args, act_mask, logp_a, reward
                 )
                 # print("apply action in env ...")
-                timeStepTuple = env.step(
+                step_type, reward, discount, obs = env.step(
                     [actions.FunctionCall(act_id.numpy().item(), sc2act_args)]
-                )
-                step_type, reward, discount, obs = timeStepTuple[0]
+                )[0]
                 obs = preprocess(obs)
 
                 if step_type == step_type.LAST:
                     buffer.finalize(reward)
 
-                    # respawn env
-                    _, _, _, obs = env.reset()[0]
-                    obs = preprocess(obs)
-
-                    # stop render
-                    render_env = True
-
                     if buffer.size() > batch_size:
                         break
+
+                    # respawn env
+                    env.render(False)
+                    timestep = env.reset()
+                    _, _, _, obs = timestep[0]
+                    obs = preprocess(obs)
 
             @tf.function
             def train_step(
@@ -184,7 +167,6 @@ def train(env_name, batch_size, epochs):
                 act_args,
                 act_mask,
                 ret,
-                batch_size,
             ):
                 # FIXME: some variables don't have gradient due to multihead action layers
                 with tf.GradientTape() as tape:
@@ -194,12 +176,10 @@ def train(env_name, batch_size, epochs):
                         upgrades,
                         available_act,
                         minimap,
-                        batch_size,
                         act_id,
                         act_args,
                         act_mask,
                         ret,
-                        action_spec,
                     )
                 grad = tape.gradient(ls, actor_critic.trainable_variables)
                 optimizer.apply_gradients(zip(grad, actor_critic.trainable_variables))
@@ -231,7 +211,6 @@ def train(env_name, batch_size, epochs):
                 act_args,
                 act_mask,
                 ret,
-                buffer.size(),
             )
 
             if tracing_on:
@@ -261,7 +240,7 @@ def train(env_name, batch_size, epochs):
 
 def main(argv):
     epochs = 100
-    batch_size = 128
+    batch_size = 256
     train(FLAGS.env_name, batch_size, epochs)
 
 

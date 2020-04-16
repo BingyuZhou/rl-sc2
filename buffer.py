@@ -1,11 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from pysc2.lib import actions
-
-
-def XYToInd(location, width, height):
-    """Location (x,y) to index"""
-    return location[1] * width + location[0]
+from utils import XYToInd
 
 
 class Buffer:
@@ -84,7 +80,7 @@ class Buffer:
     def sample(self):
         """Return buffer elements"""
         # fill args vector for better computation of logp
-        args = np.zeros((self.batch_len[0], len(actions.TYPES)))
+        args = np.zeros((self.size(), len(actions.TYPES)))
 
         args[
             np.nonzero(np.array(self.batch_act_masks, dtype=np.int8))
