@@ -223,8 +223,6 @@ class Actor_Critic(keras.Model):
             axis=-1,
         )
 
-        # FIXME: how to get value in tf.function
-
         for arg_type in self.action_spec.functions[action_id.numpy().item()].args:
             if arg_type.name in ["screen", "screen2", "minimap"]:
                 location_id = tf.random.categorical(out["target_location"], 1)
@@ -299,31 +297,6 @@ class Actor_Critic(keras.Model):
         logp += tf.reduce_sum(action_mask * tf.stack(logp_args, axis=-1), axis=-1)
 
         return logp
-        # logp_args = []
-        # for batch_ind, action_id in enumerate(action_ids):
-        #     logp_args_ind = [0]
-        #     for ind, arg_type in enumerate(
-        #             action_spec.functions[action_id].args):
-        #         if arg_type.name in ['screen', 'screen2', 'minimap']:
-        #             location_id = action_args[batch_ind][ind][
-        #                 1] * self.location_out_width + action_args[batch_ind][
-        #                     ind][0]
-        #             logp_args_ind += tf.reduce_sum(
-        #                 logp_pi['target_location'][batch_ind] *
-        #                 tf.one_hot(location_id,
-        #                            depth=self.location_out_width *
-        #                            self.location_out_height),
-        #                 axis=-1)
-        #         else:
-        #             # non-spatial args
-        #             logp_args_ind += tf.reduce_sum(
-        #                 logp_pi[arg_type.name][batch_ind] *
-        #                 tf.one_hot(action_args[batch_ind][ind],
-        #                            depth=arg_type.sizes[0]),
-        #                 axis=-1)
-        #     logp_args.append(logp_args_ind)
-
-        # return logp + tf.squeeze(tf.stack(logp_args))
 
     def loss(
         self,

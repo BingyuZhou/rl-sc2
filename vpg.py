@@ -47,13 +47,14 @@ flags.DEFINE_bool("disable_fog", False, "Whether to disable Fog of War.")
 
 def indToXY(id, width, height):
     """Index to (x,y) location"""
-    x, y = id % width, id // width
+    # Observation map is y-major coordinate
+    y, x = id % width, id // width
     return [x, y]
 
 
 def XYToInd(location, width, height):
     """Location (x,y) to index"""
-    return location[1] * width + location[0]
+    return location[0] * width + location[1]
 
 
 def preprocess(obs):
