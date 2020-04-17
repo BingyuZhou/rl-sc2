@@ -111,9 +111,6 @@ def train(env_name, batch_size, epochs):
             # initialize replay buffer
             buffer = Buffer(MINIMAP_RES, MINIMAP_RES)
 
-            # turn on render for the first episode
-            env.render(True)
-
             # initial observation
             timestep = env.reset()
             step_type, reward, discount, obs = timestep[0]
@@ -151,7 +148,7 @@ def train(env_name, batch_size, epochs):
                         break
 
                     # respawn env
-                    env.render(False)
+                    env.render(True)
                     timestep = env.reset()
                     _, _, _, obs = timestep[0]
                     obs = preprocess(obs)
