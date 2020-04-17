@@ -93,7 +93,6 @@ def translateActionToSC2(arg_spatial, arg_nonspatial, width, height):
 # run one policy update
 def train(env_name, batch_size, epochs):
     actor_critic = Actor_Critic()
-    optimizer = keras.optimizers.Adam(learning_rate=0.0003)
 
     # set env
     with SC2EnvWrapper(
@@ -106,13 +105,14 @@ def train(env_name, batch_size, epochs):
         game_steps_per_episode=FLAGS.game_steps_per_episode,
         disable_fog=FLAGS.disable_fog,
     ) as env:
-
-        action_spec = env.action_spec()[0]  # assume one agent
-        actor_critic.set_act_spec(action_spec)
+        actor_critic.set_act_spec(env.action_spec()[0])  # assume one agent
 
         def train_one_epoch(tracing_on):
             # initialize replay buffer
             buffer = Buffer(MINIMAP_RES, MINIMAP_RES)
+
+            # turn on render for the first episode
+            env.render(True)
 
             # initial observation
             timestep = env.reset()
@@ -134,7 +134,7 @@ def train(env_name, batch_size, epochs):
                 )
 
                 # print("buffer logging ...")
-                act_mask = get_mask(act_id.numpy().item(), action_spec)
+                act_mask = get_mask(act_id.numpy().item(), actor_critic.action_spec)
                 buffer.add(
                     *obs, act_id.numpy().item(), sc2act_args, act_mask, logp_a, reward
                 )
@@ -156,35 +156,6 @@ def train(env_name, batch_size, epochs):
                     _, _, _, obs = timestep[0]
                     obs = preprocess(obs)
 
-            @tf.function
-            def train_step(
-                player,
-                home_away_race,
-                upgrades,
-                available_act,
-                minimap,
-                act_id,
-                act_args,
-                act_mask,
-                ret,
-            ):
-                # FIXME: some variables don't have gradient due to multihead action layers
-                with tf.GradientTape() as tape:
-                    ls = actor_critic.loss(
-                        player,
-                        home_away_race,
-                        upgrades,
-                        available_act,
-                        minimap,
-                        act_id,
-                        act_args,
-                        act_mask,
-                        ret,
-                    )
-                grad = tape.gradient(ls, actor_critic.trainable_variables)
-                optimizer.apply_gradients(zip(grad, actor_critic.trainable_variables))
-                return ls
-
             # update policy
             (
                 player,
@@ -201,7 +172,7 @@ def train(env_name, batch_size, epochs):
             if tracing_on:
                 tf.summary.trace_on(graph=True, profiler=False)
 
-            batch_loss = train_step(
+            batch_loss = actor_critic.train_step(
                 player,
                 home_away_race,
                 upgrades,

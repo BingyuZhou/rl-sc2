@@ -1,5 +1,5 @@
-from pysc2.env import sc2_env, environment
-import collections
+from pysc2.env import sc2_env
+from pysc2.lib import renderer_human
 
 
 class SC2EnvWrapper(sc2_env.SC2Env):
@@ -25,5 +25,10 @@ class SC2EnvWrapper(sc2_env.SC2Env):
         )
 
     def render(self, render_on):
-        if not render_on:
+        if render_on:
+            self._renderer_human = renderer_human.RendererHuman()
+            self._renderer_human.init(
+                self._controllers[0].game_info(), self._controllers[0].data()
+            )
+        else:
             self._renderer_human = None

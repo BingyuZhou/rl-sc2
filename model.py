@@ -27,6 +27,7 @@ class GLU(keras.Model):
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
+        self.optimizer = keras.optimizers.Adam(learning_rate=0.0003)
 
         # upgrades
         self.embed_upgrads = keras.layers.Dense(64, activation="tanh")
@@ -313,3 +314,33 @@ class Actor_Critic(keras.Model):
         logp = self.logp_a(act_id, act_args, act_mask, out)
 
         return -tf.reduce_mean(logp * ret)
+
+    @tf.function
+    def train_step(
+        self,
+        player,
+        home_away_race,
+        upgrades,
+        available_act,
+        minimap,
+        act_id,
+        act_args,
+        act_mask,
+        ret,
+    ):
+        # FIXME: some variables don't have gradient due to multihead action layers
+        with tf.GradientTape() as tape:
+            ls = self.loss(
+                player,
+                home_away_race,
+                upgrades,
+                available_act,
+                minimap,
+                act_id,
+                act_args,
+                act_mask,
+                ret,
+            )
+        grad = tape.gradient(ls, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
+        return ls
