@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def indToXY(id, width, height):
     """Index to (x,y) location"""
     # Observation map is y-major coordinate
@@ -8,3 +11,8 @@ def indToXY(id, width, height):
 def XYToInd(location, width, height):
     """Location (x,y) to index"""
     return location[1] * width + location[0]
+
+
+def count_vars(trainable_var):
+    """Count trainable variables"""
+    return sum([np.prod(var.shape.as_list()) for var in trainable_var])

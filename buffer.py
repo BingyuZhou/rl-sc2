@@ -2,15 +2,32 @@ import numpy as np
 import tensorflow as tf
 from pysc2.lib import actions
 from utils import XYToInd
+import scipy
+
+
+def discount_cumsum(x, discount):
+    """
+    magic from rllab for computing discounted cumulative sums of vectors.
+
+    input: 
+        vector x, 
+        [x0, 
+         x1, 
+         x2]
+
+    output:
+        [x0 + discount * x1 + discount^2 * x2,  
+         x1 + discount * x2,
+         x2]
+    """
+    return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
 
 class Buffer:
     """Replay buffer"""
 
-    def __init__(self, width, height):
-        """
-        Obs
-        """
+    def __init__(self, width, height, gamma=0.99, lam=0.95):
+        # obs
         self.batch_player = []
         self.batch_home_away_race = []
         self.batch_upgrades = []
@@ -22,13 +39,18 @@ class Buffer:
         # This mask is useful to compute logp(a|s) for action args.
         # It makes the loss derivable for all variables!
         self.batch_act_masks = []
-        self.batch_ret = []  # batch return
         self.batch_len = []  # batch trajectory length
         self.batch_logp = []  # batch logp(a|s)
         self.ep_rew = []  # episode rewards (trajectory rewards)
+        self.ep_vals = []  # episode estimated values
         self.ep_len = 0  # length of trajectory
         self.width = width
         self.height = height
+
+        self.gamma = gamma  # discount
+        self.lam = lam  # GAE-lambda
+
+        self.count = 0
 
     def add(
         self,
@@ -42,6 +64,7 @@ class Buffer:
         act_mask,
         logp_a,
         reward,
+        val,
     ):
         """Add one entry"""
         self.batch_player.append(player)
@@ -62,25 +85,33 @@ class Buffer:
         self.batch_logp.append(logp_a)
         self.ep_len += 1
         self.ep_rew.append(reward)
+        self.ep_vals.append(val)
 
-    def finalize(self, reward):
+        self.count += 1
+
+    def finalize(self, reward, val):
         """Finalize one trajectory"""
         self.ep_rew.append(reward)
-        ret = np.sum(self.ep_rew, dtype="float32")
-        self.batch_ret += [ret] * self.ep_len
+        self.ep_vals.append(val)
+        # GAE
+        # A(s,a) = r(s,a) + \gamma * v(s') - v(s)
+        deltas = self.ep_rew[:-1] + self.gamma * self.ep_vals[1:] - self.ep_vals[:-1]
+        self.adv = discount_cumsum(deltas, self.gamma * self.lam)
+
         self.batch_len.append(self.ep_len)
 
         # reset
         self.ep_len = 0
         self.ep_rew.clear()
+        self.ep_vals.clear()
 
     def size(self):
-        return len(self.batch_ret)
+        return self.count
 
     def sample(self):
         """Return buffer elements"""
         # fill args vector for better computation of logp
-        args = np.zeros((self.size(), len(actions.TYPES)))
+        args = np.zeros((self.size(), len(actions.TYPES)), dtype="float32")
 
         args[
             np.nonzero(np.array(self.batch_act_masks, dtype=np.int8))
@@ -98,5 +129,5 @@ class Buffer:
             tf.constant(self.batch_act_id),
             tf.constant(args, dtype=tf.int32),
             tf.constant(self.batch_act_masks),
-            tf.constant(self.batch_ret),
+            tf.constant(self.adv, dtype=tf.float32),
         )
