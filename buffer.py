@@ -26,7 +26,7 @@ def discount_cumsum(x, discount):
 class Buffer:
     """Replay buffer"""
 
-    def __init__(self, width, height, gamma=0.99, lam=0.95):
+    def __init__(self, batch_size, width, height, gamma=0.99, lam=0.95):
         # obs
         self.batch_player = []
         self.batch_home_away_race = []
@@ -53,6 +53,7 @@ class Buffer:
         self.lam = lam  # GAE-lambda
 
         self.count = 0
+        self.batch_size = batch_size
 
     def add(
         self,
@@ -91,28 +92,31 @@ class Buffer:
 
         self.count += 1
 
-    def finalize(self, reward, val):
+    def finalize(self, last_val):
         """Finalize one trajectory"""
-        self.ep_rew.append(reward)
-        self.ep_vals.append(val)
+        self.ep_rew.append(last_val)
+        self.ep_vals.append(last_val)
         # GAE
         # A(s,a) = r(s,a) + \gamma * v(s') - v(s)
         self.ep_rew = np.asarray(self.ep_rew, dtype="float32")
         self.ep_vals = np.asarray(self.ep_vals, dtype="float32")
         deltas = self.ep_rew[:-1] + self.gamma * self.ep_vals[1:] - self.ep_vals[:-1]
-        self.batch_adv.append(*discount_cumsum(deltas, self.gamma * self.lam))
+        self.batch_adv.append(discount_cumsum(deltas, self.gamma * self.lam))
 
-        self.batch_ret.append(*discount_cumsum(self.ep_rew, self.gamma))
+        self.batch_ret.append(discount_cumsum(self.ep_rew, self.gamma))
 
         self.batch_len.append(self.ep_len)
 
         # reset
         self.ep_len = 0
-        self.ep_rew.clear()
-        self.ep_vals.clear()
+        self.ep_rew = []
+        self.ep_vals = []
 
     def size(self):
         return self.count
+
+    def is_full(self):
+        return self.count == self.batch_size
 
     def sample(self):
         """Return buffer elements"""
@@ -123,6 +127,9 @@ class Buffer:
             np.nonzero(np.array(self.batch_act_masks, dtype=np.int8))
         ] = self.batch_act_args
 
+        # concatenate adv and ret
+        self.batch_adv = np.concatenate(self.batch_adv, axis=0)
+        self.batch_ret = np.concatenate(self.batch_ret, axis=0)
         # TODO: In order to fulfill tf.function requirements for autograph,
         # we need to use tf.Tensor object as interface.
         # Thus obs needs to be seperated for each feature entity

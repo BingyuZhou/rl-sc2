@@ -147,10 +147,19 @@ def train(env_name, batch_size, epochs):
                 )[0]
                 obs = preprocess(obs)
 
-                if step_type == step_type.LAST:
-                    buffer.finalize(reward, val)
+                if step_type == step_type.LAST or buffer.is_full():
+                    if step_type == step_type.LAST:
+                        buffer.finalize(reward)
+                    else:
+                        # trajectory is cut off, bootstrap last state with estimated value
+                        tf_obs = (
+                            tf.constant(each_obs, shape=(1, *each_obs.shape))
+                            for each_obs in obs
+                        )
+                        val, _, _, _, _ = actor_critic.step(*tf_obs)
+                        buffer.finalize(val)
 
-                    if buffer.size() > batch_size:
+                    if buffer.is_full():
                         break
 
                     # respawn env
