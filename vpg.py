@@ -134,12 +134,12 @@ def train(env_name, batch_size, epochs):
                     sc2act_args,
                     act_mask,
                     logp_a.numpy().item(),
-                    reward,
                     val.numpy().item()
                 )
                 step_type, reward, _, obs = env.step(
                     [actions.FunctionCall(act_id.numpy().item(), sc2act_args)]
                 )[0]
+                buffer.add_rew(reward)
                 obs = preprocess(obs)
 
                 if step_type == step_type.LAST or buffer.is_full():
@@ -174,6 +174,7 @@ def train(env_name, batch_size, epochs):
                 act_args,
                 act_mask,
                 logp,
+                val,
                 ret,
                 adv,
             ) = buffer.sample()
@@ -192,6 +193,7 @@ def train(env_name, batch_size, epochs):
                 act_args,
                 act_mask,
                 logp,
+                val,
                 ret,
                 adv,
             )

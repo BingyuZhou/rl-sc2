@@ -206,6 +206,10 @@ class Actor_Critic(keras.Model):
         """Sample actions and compute logp(a|s)"""
         out = self.call(player, home_away_race, upgrades, available_act, minimap)
 
+        for key in out:
+            if key != "value" and key != "action_id":
+                out[key] = tf.nn.log_softmax(out[key], axis=-1)
+
         # EPS is used to avoid log(0) =-inf
         available_act_mask = (
             tf.ones(NUM_ACTION_FUNCTIONS, dtype=np.float32) * EPS + available_act
@@ -313,6 +317,7 @@ class Actor_Critic(keras.Model):
         act_args,
         act_mask,
         old_logp,
+        old_v,
         ret,
         adv,
     ):
@@ -331,7 +336,13 @@ class Actor_Critic(keras.Model):
 
         pg_loss = -tf.reduce_mean(tf.minimum(pg_loss_1, pg_loss_2))
 
-        v_loss = tf.reduce_mean(tf.square(out["value"] - adv))
+        v_clip = old_v + tf.clip_by_value(
+            out["value"] - old_v, -self.clip_range, self.clip_range
+        )
+        v_clip_loss = tf.square((v_clip - adv) ** 2)
+
+        v_loss = tf.square(out["value"] - adv)
+        v_loss = tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
 
         with train_summary_writer.as_default():
             tf.summary.scalar("pg_loss", pg_loss, step)
@@ -352,6 +363,7 @@ class Actor_Critic(keras.Model):
         act_args,
         act_mask,
         old_logp,
+        old_v,
         ret,
         adv,
     ):
@@ -367,6 +379,7 @@ class Actor_Critic(keras.Model):
                 act_args,
                 act_mask,
                 old_logp,
+                old_v,
                 ret,
                 adv,
             )

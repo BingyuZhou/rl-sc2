@@ -43,6 +43,7 @@ class Buffer:
         self.batch_logp = []  # batch logp(a|s)
         self.batch_ret = []  # rewards to go, used for value function
         self.batch_adv = []
+        self.batch_vals = []
         self.ep_rew = []  # episode rewards (trajectory rewards)
         self.ep_vals = []  # episode estimated values
         self.ep_len = 0  # length of trajectory
@@ -66,7 +67,6 @@ class Buffer:
         act_args,
         act_mask,
         logp_a,
-        reward,
         val,
     ):
         """Add one entry"""
@@ -87,10 +87,13 @@ class Buffer:
         self.batch_act_masks.append(act_mask)
         self.batch_logp.append(logp_a)
         self.ep_len += 1
-        self.ep_rew.append(reward)
         self.ep_vals.append(val)
+        self.batch_vals.append(val)
 
         self.count += 1
+
+    def add_rew(self, rew):
+        self.ep_rew.append(rew)
 
     def finalize(self, last_val):
         """Finalize one trajectory"""
@@ -147,6 +150,7 @@ class Buffer:
             tf.constant(args, dtype=tf.int32),
             tf.constant(self.batch_act_masks),
             tf.constant(self.batch_logp, dtype=tf.float32),
+            tf.constant(self.batch_vals, dtype=tf.float32),
             tf.constant(self.batch_ret, dtype=tf.float32),
             tf.constant(self.batch_adv, dtype=tf.float32),
         )
