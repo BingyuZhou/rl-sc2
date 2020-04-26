@@ -3,6 +3,7 @@ from tensorflow import keras
 import numpy as np
 from utils import indToXY, XYToInd
 from constants import *
+from log import train_summary_writer
 
 from pysc2.lib import features, actions
 
@@ -29,6 +30,8 @@ class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
         self.optimizer = keras.optimizers.Adam(learning_rate=0.0003)
+        self.clip_range = 0.1
+        self.v_coef = 0.25
 
         # upgrades
         self.embed_upgrads = keras.layers.Dense(64, activation="tanh")
@@ -300,6 +303,7 @@ class Actor_Critic(keras.Model):
 
     def loss(
         self,
+        step,
         player,
         home_away_race,
         upgrades,
@@ -308,22 +312,37 @@ class Actor_Critic(keras.Model):
         act_id,
         act_args,
         act_mask,
+        old_logp,
         ret,
         adv,
     ):
         # expection grad log
         out = self.call(player, home_away_race, upgrades, available_act, minimap)
 
+        # new pi(a|s)
         logp = self.logp_a(act_id, act_args, act_mask, out)
-        pg_loss = -tf.reduce_mean(logp * adv)
+
+        delta_pi = tf.exp(logp - old_logp)
+
+        pg_loss_1 = delta_pi * adv
+        pg_loss_2 = (
+            tf.clip_by_value(delta_pi, 1 - self.clip_range, 1 + self.clip_range) * adv
+        )
+
+        pg_loss = -tf.reduce_mean(tf.minimum(pg_loss_1, pg_loss_2))
 
         v_loss = tf.reduce_mean(tf.square(out["value"] - adv))
 
-        return pg_loss + v_loss
+        with train_summary_writer.as_default():
+            tf.summary.scalar("pg_loss", pg_loss, step)
+            tf.summary.scalar("v_loss", v_loss, step)
+
+        return pg_loss + self.v_coef * v_loss
 
     @tf.function
     def train_step(
         self,
+        step,
         player,
         home_away_race,
         upgrades,
@@ -332,12 +351,13 @@ class Actor_Critic(keras.Model):
         act_id,
         act_args,
         act_mask,
+        old_logp,
         ret,
         adv,
     ):
-        # FIXME: some variables don't have gradient due to multihead action layers
         with tf.GradientTape() as tape:
             ls = self.loss(
+                step,
                 player,
                 home_away_race,
                 upgrades,
@@ -346,6 +366,7 @@ class Actor_Critic(keras.Model):
                 act_id,
                 act_args,
                 act_mask,
+                old_logp,
                 ret,
                 adv,
             )

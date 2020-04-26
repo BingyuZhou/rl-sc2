@@ -8,11 +8,12 @@ from model import Actor_Critic
 from utils import indToXY, XYToInd
 from constants import *
 
+from log import train_summary_writer
+
 import tensorflow as tf
 from tensorflow import keras
 import tensorboard as tb
 import numpy as np
-import datetime
 from absl import app, flags
 import sys
 
@@ -22,12 +23,6 @@ from sc2env_wrapper import SC2EnvWrapper
 from pysc2.lib.named_array import NamedNumpyArray
 
 tf.keras.backend.set_floatx("float32")
-""" log info"""
-current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-train_log_dir = "logs/" + current_time + "/train"
-test_log_dir = "logs/" + current_time + "/test"
-train_summary_writer = tf.summary.create_file_writer(train_log_dir)
-test_summary_writer = tf.summary.create_file_writer(test_log_dir)
 
 
 # args
@@ -107,13 +102,13 @@ def train(env_name, batch_size, epochs):
     ) as env:
         actor_critic.set_act_spec(env.action_spec()[0])  # assume one agent
 
-        def train_one_epoch(tracing_on):
+        def train_one_epoch(step, tracing_on):
             # initialize replay buffer
-            buffer = Buffer(MINIMAP_RES, MINIMAP_RES)
+            buffer = Buffer(batch_size, MINIMAP_RES, MINIMAP_RES)
 
             # initial observation
             timestep = env.reset()
-            step_type, reward, discount, obs = timestep[0]
+            step_type, reward, _, obs = timestep[0]
             obs = preprocess(obs)
 
             # fill in recorded trajectories
@@ -142,7 +137,7 @@ def train(env_name, batch_size, epochs):
                     reward,
                     val.numpy().item()
                 )
-                step_type, reward, discount, obs = env.step(
+                step_type, reward, _, obs = env.step(
                     [actions.FunctionCall(act_id.numpy().item(), sc2act_args)]
                 )[0]
                 obs = preprocess(obs)
@@ -178,6 +173,7 @@ def train(env_name, batch_size, epochs):
                 act_id,
                 act_args,
                 act_mask,
+                logp,
                 ret,
                 adv,
             ) = buffer.sample()
@@ -186,6 +182,7 @@ def train(env_name, batch_size, epochs):
                 tf.summary.trace_on(graph=True, profiler=False)
 
             batch_loss = actor_critic.train_step(
+                tf.constant(step, dtype=tf.int64),
                 player,
                 home_away_race,
                 upgrades,
@@ -194,6 +191,7 @@ def train(env_name, batch_size, epochs):
                 act_id,
                 act_args,
                 act_mask,
+                logp,
                 ret,
                 adv,
             )
@@ -209,7 +207,7 @@ def train(env_name, batch_size, epochs):
                 tracing_on = True
             else:
                 tracing_on = False
-            batch_loss, batch_ret, batch_len = train_one_epoch(tracing_on)
+            batch_loss, batch_ret, batch_len = train_one_epoch(i, tracing_on)
             with train_summary_writer.as_default():
                 tf.summary.scalar("batch_ret", np.mean(batch_ret), step=i)
                 tf.summary.scalar("batch_len", np.mean(batch_len), step=i)

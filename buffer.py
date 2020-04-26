@@ -130,6 +130,10 @@ class Buffer:
         # concatenate adv and ret
         self.batch_adv = np.concatenate(self.batch_adv, axis=0)
         self.batch_ret = np.concatenate(self.batch_ret, axis=0)
+        # adv normalization trick
+        adv_mean, adv_std = np.mean(self.batch_adv), np.std(self.batch_adv)
+        self.batch_adv = (self.batch_adv - adv_mean) / adv_std
+
         # TODO: In order to fulfill tf.function requirements for autograph,
         # we need to use tf.Tensor object as interface.
         # Thus obs needs to be seperated for each feature entity
@@ -142,6 +146,7 @@ class Buffer:
             tf.constant(self.batch_act_id),
             tf.constant(args, dtype=tf.int32),
             tf.constant(self.batch_act_masks),
+            tf.constant(self.batch_logp, dtype=tf.float32),
             tf.constant(self.batch_ret, dtype=tf.float32),
             tf.constant(self.batch_adv, dtype=tf.float32),
         )
