@@ -41,6 +41,8 @@ class Buffer:
         self.batch_act_masks = []
         self.batch_len = []  # batch trajectory length
         self.batch_logp = []  # batch logp(a|s)
+        self.batch_ret = []  # rewards to go, used for value function
+        self.batch_adv = []
         self.ep_rew = []  # episode rewards (trajectory rewards)
         self.ep_vals = []  # episode estimated values
         self.ep_len = 0  # length of trajectory
@@ -95,8 +97,12 @@ class Buffer:
         self.ep_vals.append(val)
         # GAE
         # A(s,a) = r(s,a) + \gamma * v(s') - v(s)
+        self.ep_rew = np.asarray(self.ep_rew, dtype="float32")
+        self.ep_vals = np.asarray(self.ep_vals, dtype="float32")
         deltas = self.ep_rew[:-1] + self.gamma * self.ep_vals[1:] - self.ep_vals[:-1]
-        self.adv = discount_cumsum(deltas, self.gamma * self.lam)
+        self.batch_adv.append(*discount_cumsum(deltas, self.gamma * self.lam))
+
+        self.batch_ret.append(*discount_cumsum(self.ep_rew, self.gamma))
 
         self.batch_len.append(self.ep_len)
 
@@ -129,5 +135,6 @@ class Buffer:
             tf.constant(self.batch_act_id),
             tf.constant(args, dtype=tf.int32),
             tf.constant(self.batch_act_masks),
-            tf.constant(self.adv, dtype=tf.float32),
+            tf.constant(self.batch_ret, dtype=tf.float32),
+            tf.constant(self.batch_adv, dtype=tf.float32),
         )

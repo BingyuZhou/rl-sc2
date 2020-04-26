@@ -124,25 +124,31 @@ def train(env_name, batch_size, epochs):
                 )
 
                 # print("computing action ...")
-                act_id, arg_spatial, arg_nonspatial, logp_a = actor_critic.step(*tf_obs)
+                val, act_id, arg_spatial, arg_nonspatial, logp_a = actor_critic.step(
+                    *tf_obs
+                )
 
                 sc2act_args = translateActionToSC2(
                     arg_spatial, arg_nonspatial, MINIMAP_RES, MINIMAP_RES
                 )
 
-                # print("buffer logging ...")
                 act_mask = get_mask(act_id.numpy().item(), actor_critic.action_spec)
                 buffer.add(
-                    *obs, act_id.numpy().item(), sc2act_args, act_mask, logp_a, reward
+                    *obs,
+                    act_id.numpy().item(),
+                    sc2act_args,
+                    act_mask,
+                    logp_a.numpy().item(),
+                    reward,
+                    val.numpy().item()
                 )
-                # print("apply action in env ...")
                 step_type, reward, discount, obs = env.step(
                     [actions.FunctionCall(act_id.numpy().item(), sc2act_args)]
                 )[0]
                 obs = preprocess(obs)
 
                 if step_type == step_type.LAST:
-                    buffer.finalize(reward)
+                    buffer.finalize(reward, val)
 
                     if buffer.size() > batch_size:
                         break
@@ -164,6 +170,7 @@ def train(env_name, batch_size, epochs):
                 act_args,
                 act_mask,
                 ret,
+                adv,
             ) = buffer.sample()
 
             if tracing_on:
@@ -179,6 +186,7 @@ def train(env_name, batch_size, epochs):
                 act_args,
                 act_mask,
                 ret,
+                adv,
             )
 
             if tracing_on:

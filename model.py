@@ -24,6 +24,7 @@ class GLU(keras.Model):
         return x
 
 
+# TODO: add value network
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
@@ -81,7 +82,7 @@ class Actor_Critic(keras.Model):
             1, 1, padding="same", name="target_location_out"
         )
 
-        # self.value = keras.layers.Dense(1, name="value_out")
+        self.value = keras.layers.Dense(1, name="value_out")
 
     def set_act_spec(self, action_spec):
         self.action_spec = action_spec
@@ -158,7 +159,7 @@ class Actor_Critic(keras.Model):
         Decision output
         """
         # value
-        # value_out = self.value(core_out_flat)
+        value_out = self.value(core_out_flat)
         # action id
         action_id_out = self.action_id_layer(core_out_flat)
         action_id_out = self.action_id_gate(action_id_out, embed_available_act)
@@ -187,7 +188,7 @@ class Actor_Critic(keras.Model):
         target_location_out = self.target_location_flat(target_location_out)
 
         out = {
-            # "value": value_out,
+            "value": value_out,
             "action_id": action_id_out,
             "queued": queued_out,
             "select_point_act": select_point_out,
@@ -244,6 +245,7 @@ class Actor_Critic(keras.Model):
                 )
 
         return (
+            out["value"],
             action_id,
             arg_spatial,
             arg_nonspatial,
@@ -307,13 +309,17 @@ class Actor_Critic(keras.Model):
         act_args,
         act_mask,
         ret,
+        adv,
     ):
         # expection grad log
         out = self.call(player, home_away_race, upgrades, available_act, minimap)
 
         logp = self.logp_a(act_id, act_args, act_mask, out)
+        pg_loss = -tf.reduce_mean(logp * adv)
 
-        return -tf.reduce_mean(logp * ret)
+        v_loss = tf.reduce_mean(tf.square(out["value"] - adv))
+
+        return pg_loss + v_loss
 
     @tf.function
     def train_step(
@@ -327,6 +333,7 @@ class Actor_Critic(keras.Model):
         act_args,
         act_mask,
         ret,
+        adv,
     ):
         # FIXME: some variables don't have gradient due to multihead action layers
         with tf.GradientTape() as tape:
@@ -340,6 +347,7 @@ class Actor_Critic(keras.Model):
                 act_args,
                 act_mask,
                 ret,
+                adv,
             )
         grad = tape.gradient(ls, self.trainable_variables)
         self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
