@@ -3,6 +3,7 @@ import tensorflow as tf
 from pysc2.lib import actions
 from utils import XYToInd
 import scipy
+from constants import EPS
 
 
 def discount_cumsum(x, discount):
@@ -135,11 +136,8 @@ class Buffer:
         self.batch_ret = np.concatenate(self.batch_ret, axis=0)
         # adv normalization trick
         adv_mean, adv_std = np.mean(self.batch_adv), np.std(self.batch_adv)
-        self.batch_adv = (self.batch_adv - adv_mean) / adv_std
+        self.batch_adv = (self.batch_adv - adv_mean) / (adv_std + EPS)
 
-        # TODO: In order to fulfill tf.function requirements for autograph,
-        # we need to use tf.Tensor object as interface.
-        # Thus obs needs to be seperated for each feature entity
         return (
             tf.constant(self.batch_player),
             tf.constant(self.batch_home_away_race),

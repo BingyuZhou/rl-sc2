@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 
 
 def indToXY(id, width, height):
@@ -16,3 +17,8 @@ def XYToInd(location, width, height):
 def count_vars(trainable_var):
     """Count trainable variables"""
     return sum([np.prod(var.shape.as_list()) for var in trainable_var])
+
+
+def entropy(logp):
+    p = tf.exp(logp)
+    return -tf.reduce_sum(p * logp)

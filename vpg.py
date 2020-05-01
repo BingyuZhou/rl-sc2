@@ -211,9 +211,9 @@ def train(env_name, batch_size, epochs):
                 tracing_on = False
             batch_loss, batch_ret, batch_len = train_one_epoch(i, tracing_on)
             with train_summary_writer.as_default():
-                tf.summary.scalar("batch_ret", np.mean(batch_ret), step=i)
-                tf.summary.scalar("batch_len", np.mean(batch_len), step=i)
-                tf.summary.scalar("batch_loss", batch_loss.numpy(), step=i)
+                tf.summary.scalar("batch/batch_ret", np.mean(batch_ret), step=i)
+                tf.summary.scalar("batch/batch_len", np.mean(batch_len), step=i)
+                tf.summary.scalar("/oss/batch_loss", batch_loss.numpy(), step=i)
             print("----------------------------")
             print(
                 "epoch {0:2d} loss {1:.3f} batch_ret {2:.3f} batch_len {3:.3f}".format(

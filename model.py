@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
-from utils import indToXY, XYToInd
+from utils import indToXY, XYToInd, entropy
 from constants import *
 from log import train_summary_writer
 
@@ -25,13 +25,13 @@ class GLU(keras.Model):
         return x
 
 
-# TODO: add value network
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
-        self.optimizer = keras.optimizers.Adam(learning_rate=0.0003)
+        self.optimizer = keras.optimizers.Adam(learning_rate=3e-4)
         self.clip_range = 0.1
-        self.v_coef = 0.25
+        self.v_coef = 0.5
+        self.max_grad_norm = 0.5
 
         # upgrades
         self.embed_upgrads = keras.layers.Dense(64, activation="tanh")
@@ -344,9 +344,14 @@ class Actor_Critic(keras.Model):
         v_loss = tf.square(out["value"] - adv)
         v_loss = tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
 
+        approx_entropy = entropy(logp)
+        approx_kl = tf.reduce_mean(tf.square(old_logp - logp))
+
         with train_summary_writer.as_default():
-            tf.summary.scalar("pg_loss", pg_loss, step)
-            tf.summary.scalar("v_loss", v_loss, step)
+            tf.summary.scalar("loss/pg_loss", pg_loss, step)
+            tf.summary.scalar("loss/v_loss", v_loss, step)
+            tf.summary.scalar("stat/approx_entropy", approx_entropy, step)
+            tf.summary.scalar("stat/approx_kl", approx_kl, step)
 
         return pg_loss + self.v_coef * v_loss
 
@@ -384,5 +389,7 @@ class Actor_Critic(keras.Model):
                 adv,
             )
         grad = tape.gradient(ls, self.trainable_variables)
+        # clip grad (https://arxiv.org/pdf/1211.5063.pdf)
+        grad, _ = tf.clip_by_global_norm(grad, self.max_grad_norm)
         self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
         return ls
