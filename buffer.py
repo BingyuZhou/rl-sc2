@@ -27,7 +27,7 @@ def discount_cumsum(x, discount):
 class Buffer:
     """Replay buffer"""
 
-    def __init__(self, batch_size, width, height, gamma=0.99, lam=0.95):
+    def __init__(self, batch_size, minibatch_size, width, height, gamma=0.99, lam=0.95):
         # obs
         self.batch_player = []
         self.batch_home_away_race = []
@@ -56,6 +56,8 @@ class Buffer:
 
         self.count = 0
         self.batch_size = batch_size
+        assert batch_size % minibatch_size == 0
+        self.minibatch_size = minibatch_size
 
     def add(
         self,
@@ -122,7 +124,11 @@ class Buffer:
     def is_full(self):
         return self.count == self.batch_size
 
-    def sample(self):
+    def shuffle(self):
+        self.ind = np.arange(self.batch_size, dtype="int32")
+        np.random.shuffle(self.ind)
+
+    def post_process(self):
         """Return buffer elements"""
         # fill args vector for better computation of logp
         args = np.zeros((self.size(), len(actions.TYPES)), dtype="float32")
@@ -130,6 +136,7 @@ class Buffer:
         args[
             np.nonzero(np.array(self.batch_act_masks, dtype=np.int8))
         ] = self.batch_act_args
+        self.batch_act_args = args
 
         # concatenate adv and ret
         self.batch_adv = np.concatenate(self.batch_adv, axis=0)
@@ -138,17 +145,20 @@ class Buffer:
         adv_mean, adv_std = np.mean(self.batch_adv), np.std(self.batch_adv)
         self.batch_adv = (self.batch_adv - adv_mean) / (adv_std + EPS)
 
+    def minibatch(self, index):
+        start, end = index * self.minibatch_size, (index + 1) * self.minibatch_size
+        slices = self.ind[start:end]
         return (
-            tf.constant(self.batch_player),
-            tf.constant(self.batch_home_away_race),
-            tf.constant(self.batch_upgrades),
-            tf.constant(self.batch_available_act),
-            tf.constant(self.batch_minimap),
-            tf.constant(self.batch_act_id),
-            tf.constant(args, dtype=tf.int32),
-            tf.constant(self.batch_act_masks),
-            tf.constant(self.batch_logp, dtype=tf.float32),
-            tf.constant(self.batch_vals, dtype=tf.float32),
-            tf.constant(self.batch_ret, dtype=tf.float32),
-            tf.constant(self.batch_adv, dtype=tf.float32),
+            tf.constant(np.asarray(self.batch_player)[slices]),
+            tf.constant(np.asarray(self.batch_home_away_race)[slices]),
+            tf.constant(np.asarray(self.batch_upgrades)[slices]),
+            tf.constant(np.asarray(self.batch_available_act)[slices]),
+            tf.constant(np.asarray(self.batch_minimap)[slices]),
+            tf.constant(np.asarray(self.batch_act_id)[slices]),
+            tf.constant(self.batch_act_args[slices], dtype=tf.int32),
+            tf.constant(np.asarray(self.batch_act_masks)[slices]),
+            tf.constant(np.asarray(self.batch_logp)[slices], dtype=tf.float32),
+            tf.constant(np.asarray(self.batch_vals)[slices], dtype=tf.float32),
+            tf.constant(self.batch_ret[slices], dtype=tf.float32),
+            tf.constant(self.batch_adv[slices], dtype=tf.float32),
         )

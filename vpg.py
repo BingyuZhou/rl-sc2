@@ -86,7 +86,15 @@ def translateActionToSC2(arg_spatial, arg_nonspatial, width, height):
 
 
 # run one policy update
-def train(env_name, batch_size, epochs):
+def train(env_name, batch_size, minibatch_size, epochs):
+    """
+    Main learning function
+
+    Args:
+        batch_size: size of the buffer, may have multiple trajecties inside
+        minibatch_size: one batch is seperated into several minibatches. Each has this size.
+        epochs: in one epoch, buffer is fully filled, and trained multiple times with minibatches.
+    """
     actor_critic = Actor_Critic()
 
     # set env
@@ -104,7 +112,7 @@ def train(env_name, batch_size, epochs):
 
         def train_one_epoch(step, tracing_on):
             # initialize replay buffer
-            buffer = Buffer(batch_size, MINIMAP_RES, MINIMAP_RES)
+            buffer = Buffer(batch_size, minibatch_size, MINIMAP_RES, MINIMAP_RES)
 
             # initial observation
             timestep = env.reset()
@@ -163,70 +171,84 @@ def train(env_name, batch_size, epochs):
                     _, _, _, obs = timestep[0]
                     obs = preprocess(obs)
 
-            # update policy
-            (
-                player,
-                home_away_race,
-                upgrades,
-                available_act,
-                minimap,
-                act_id,
-                act_args,
-                act_mask,
-                logp,
-                val,
-                ret,
-                adv,
-            ) = buffer.sample()
+            # train in minibatches
+            buffer.post_process()
+            buffer.shuffle()
 
-            if tracing_on:
-                tf.summary.trace_on(graph=True, profiler=False)
+            mb_loss = []
+            for ind in range(batch_size // minibatch_size):
+                (
+                    player,
+                    home_away_race,
+                    upgrades,
+                    available_act,
+                    minimap,
+                    act_id,
+                    act_args,
+                    act_mask,
+                    logp,
+                    val,
+                    ret,
+                    adv,
+                ) = buffer.minibatch(ind)
+                if tracing_on:
+                    tf.summary.trace_on(graph=True, profiler=False)
 
-            batch_loss = actor_critic.train_step(
-                tf.constant(step, dtype=tf.int64),
-                player,
-                home_away_race,
-                upgrades,
-                available_act,
-                minimap,
-                act_id,
-                act_args,
-                act_mask,
-                logp,
-                val,
-                ret,
-                adv,
-            )
+                mb_loss.append(
+                    actor_critic.train_step(
+                        tf.constant(step, dtype=tf.int64),
+                        player,
+                        home_away_race,
+                        upgrades,
+                        available_act,
+                        minimap,
+                        act_id,
+                        act_args,
+                        act_mask,
+                        logp,
+                        val,
+                        ret,
+                        adv,
+                    )
+                )
+                step += 1
 
-            if tracing_on:
-                with train_summary_writer.as_default():
-                    tf.summary.trace_export(name="train_step", step=0)
+                if tracing_on:
+                    tracing_on = False
+                    with train_summary_writer.as_default():
+                        tf.summary.trace_export(name="train_step", step=0)
+
+            batch_loss = np.mean(mb_loss)
 
             return batch_loss, buffer.batch_ret, buffer.batch_len
 
+        num_train_per_epoch = batch_size // minibatch_size
         for i in range(epochs):
             if i == 0:
                 tracing_on = True
             else:
                 tracing_on = False
-            batch_loss, batch_ret, batch_len = train_one_epoch(i, tracing_on)
+            batch_loss, batch_ret, batch_len = train_one_epoch(
+                i * num_train_per_epoch, tracing_on
+            )
             with train_summary_writer.as_default():
                 tf.summary.scalar("batch/batch_ret", np.mean(batch_ret), step=i)
                 tf.summary.scalar("batch/batch_len", np.mean(batch_len), step=i)
-                tf.summary.scalar("/oss/batch_loss", batch_loss.numpy(), step=i)
+                tf.summary.scalar("loss/batch_loss", batch_loss, step=i)
             print("----------------------------")
             print(
                 "epoch {0:2d} loss {1:.3f} batch_ret {2:.3f} batch_len {3:.3f}".format(
-                    i, batch_loss.numpy(), np.mean(batch_ret), np.mean(batch_len)
+                    i, batch_loss, np.mean(batch_ret), np.mean(batch_len)
                 )
             )
             print("----------------------------")
 
 
 def main(argv):
-    epochs = 100
-    batch_size = 256
-    train(FLAGS.env_name, batch_size, epochs)
+    epochs = 10
+    batch_size = 320
+    minibatch_size = 32
+    train(FLAGS.env_name, batch_size, minibatch_size, epochs)
 
 
 if __name__ == "__main__":

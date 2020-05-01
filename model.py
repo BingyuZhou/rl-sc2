@@ -31,7 +31,7 @@ class Actor_Critic(keras.Model):
         self.optimizer = keras.optimizers.Adam(learning_rate=3e-4)
         self.clip_range = 0.1
         self.v_coef = 0.5
-        self.max_grad_norm = 0.5
+        self.max_grad_norm = 0.3
 
         # upgrades
         self.embed_upgrads = keras.layers.Dense(64, activation="tanh")
@@ -216,10 +216,16 @@ class Actor_Critic(keras.Model):
         )
         out["action_id"] = tf.math.softmax(out["action_id"]) * available_act_mask
         # renormalize
-        out["action_id"] /= tf.reduce_sum(out["action_id"], axis=-1, keepdims=True)
+        out["action_id"] /= EPS + tf.reduce_sum(
+            out["action_id"], axis=-1, keepdims=True
+        )
         out["action_id"] = tf.math.log(out["action_id"])
 
+        tf.debugging.check_numerics(out["action_id"])
+
         action_id = tf.random.categorical(out["action_id"], 1)
+        while tf.less_equal(available_act[:, action_id.numpy().item()], 0.9):
+            action_id = tf.random.categorical(out["action_id"], 1)
 
         # Fill out args based on sampled action type
         arg_spatial = []
@@ -372,6 +378,10 @@ class Actor_Critic(keras.Model):
         ret,
         adv,
     ):
+        tf.debugging.check_numerics(old_logp, "Bad old_logp")
+        tf.debugging.check_numerics(old_v, "Bad old_v")
+        tf.debugging.check_numerics(adv, "Bad adv")
+
         with tf.GradientTape() as tape:
             ls = self.loss(
                 step,
@@ -389,6 +399,8 @@ class Actor_Critic(keras.Model):
                 adv,
             )
         grad = tape.gradient(ls, self.trainable_variables)
+        for g in grad:
+            tf.debugging.check_numerics(g, "Bad grad")
         # clip grad (https://arxiv.org/pdf/1211.5063.pdf)
         grad, _ = tf.clip_by_global_norm(grad, self.max_grad_norm)
         self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
