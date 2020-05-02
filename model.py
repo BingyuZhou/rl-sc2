@@ -28,13 +28,13 @@ class GLU(keras.Model):
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
-        self.optimizer = keras.optimizers.Adam(learning_rate=3e-4)
-        self.clip_range = 0.1
+        self.optimizer = keras.optimizers.Adam(learning_rate=1e-4)
+        self.clip_range = 0.2
         self.v_coef = 0.5
-        self.max_grad_norm = 0.3
+        self.max_grad_norm = 0.5
 
         # upgrades
-        self.embed_upgrads = keras.layers.Dense(64, activation="tanh")
+        self.embed_upgrads = keras.layers.Dense(64, activation="relu")
         # player (agent statistics)
         self.embed_player = keras.layers.Dense(64, activation="relu")
         # available_actions
@@ -43,13 +43,13 @@ class Actor_Critic(keras.Model):
         self.embed_race = keras.layers.Dense(64, activation="relu")
         # minimap feature
         self.embed_minimap = keras.layers.Conv2D(
-            32, 1, padding="same", activation="relu"
+            32, 1, padding="valid", activation="relu"
         )
         self.embed_minimap_2 = keras.layers.Conv2D(
-            64, 3, padding="same", activation="relu"
+            64, 4, 2, padding="same", activation="relu"
         )
         self.embed_minimap_3 = keras.layers.Conv2D(
-            128, 3, padding="same", activation="relu"
+            128, 3, 2, padding="same", activation="relu"
         )
         # screen feature
         # self.embed_screen = keras.layers.Conv2D(32,
@@ -138,6 +138,7 @@ class Actor_Critic(keras.Model):
 
         one_hot_minimap = one_hot_map(minimap)
         embed_minimap = self.embed_minimap(one_hot_minimap)
+        assert embed_minimap.shape[1] == MINIMAP_RES
         # embed_minimap = self.embed_minimap_2(embed_minimap)
         # embed_minimap = self.embed_minimap_3(embed_minimap)
 
@@ -156,7 +157,7 @@ class Actor_Critic(keras.Model):
             tf.expand_dims(tf.expand_dims(scalar_out, 1), 2),
             [1, embed_minimap.shape[1], embed_minimap.shape[2], 1],
         )
-        core_out = tf.concat([scalar_out_2d, embed_minimap], axis=3, name="core")
+        core_out = tf.concat([scalar_out_2d, embed_minimap], axis=-1, name="core")
         core_out_flat = self.flat(core_out)
         """
         Decision output
@@ -211,17 +212,12 @@ class Actor_Critic(keras.Model):
                 out[key] = tf.nn.log_softmax(out[key], axis=-1)
 
         # EPS is used to avoid log(0) =-inf
-        available_act_mask = (
-            tf.ones(NUM_ACTION_FUNCTIONS, dtype=np.float32) * EPS + available_act
-        )
-        out["action_id"] = tf.math.softmax(out["action_id"]) * available_act_mask
+        out["action_id"] = tf.math.softmax(out["action_id"]) * available_act
         # renormalize
         out["action_id"] /= EPS + tf.reduce_sum(
             out["action_id"], axis=-1, keepdims=True
         )
-        out["action_id"] = tf.math.log(out["action_id"])
-
-        tf.debugging.check_numerics(out["action_id"])
+        out["action_id"] = tf.math.log(tf.maximum(out["action_id"], EPS))
 
         action_id = tf.random.categorical(out["action_id"], 1)
         while tf.less_equal(available_act[:, action_id.numpy().item()], 0.9):
@@ -233,6 +229,12 @@ class Actor_Critic(keras.Model):
         logp_a = tf.reduce_sum(
             out["action_id"] * tf.one_hot(action_id, depth=NUM_ACTION_FUNCTIONS),
             axis=-1,
+        )
+        tf.debugging.check_numerics(
+            logp_a,
+            "Bad logp(a|s) {0}\n {1}\n {2}".format(
+                action_id, available_act[:, action_id.numpy().item()], out["action_id"]
+            ),
         )
 
         for arg_type in self.action_spec.functions[action_id.numpy().item()].args:
@@ -256,6 +258,7 @@ class Actor_Critic(keras.Model):
                     out[arg_type.name] * tf.one_hot(sample, depth=arg_type.sizes[0]),
                     axis=-1,
                 )
+        tf.debugging.check_numerics(logp_a, "Bad logp(a|s)")
 
         return (
             out["value"],
@@ -345,9 +348,9 @@ class Actor_Critic(keras.Model):
         v_clip = old_v + tf.clip_by_value(
             out["value"] - old_v, -self.clip_range, self.clip_range
         )
-        v_clip_loss = tf.square((v_clip - adv) ** 2)
+        v_clip_loss = tf.square(v_clip - ret)
 
-        v_loss = tf.square(out["value"] - adv)
+        v_loss = tf.square(out["value"] - ret)
         v_loss = tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
 
         approx_entropy = entropy(logp)

@@ -7,3 +7,4 @@ train_log_dir = "logs/" + current_time + "/train"
 test_log_dir = "logs/" + current_time + "/test"
 train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 test_summary_writer = tf.summary.create_file_writer(test_log_dir)
+saved_model_dir = "saved_model/" + current_time + "/"

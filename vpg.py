@@ -8,7 +8,7 @@ from model import Actor_Critic
 from utils import indToXY, XYToInd
 from constants import *
 
-from log import train_summary_writer
+from log import train_summary_writer, saved_model_dir
 
 import tensorflow as tf
 from tensorflow import keras
@@ -16,6 +16,7 @@ import tensorboard as tb
 import numpy as np
 from absl import app, flags
 import sys
+import os.path as osp
 
 from pysc2.env import sc2_env
 from pysc2.lib import actions, features
@@ -86,7 +87,9 @@ def translateActionToSC2(arg_spatial, arg_nonspatial, width, height):
 
 
 # run one policy update
-def train(env_name, batch_size, minibatch_size, epochs):
+def train(
+    env_name, batch_size, minibatch_size, epochs, save_model=False, load_path=None
+):
     """
     Main learning function
 
@@ -96,6 +99,13 @@ def train(env_name, batch_size, minibatch_size, epochs):
         epochs: in one epoch, buffer is fully filled, and trained multiple times with minibatches.
     """
     actor_critic = Actor_Critic()
+
+    if load_path is not None:
+        print("Loading model ...")
+        load_path = osp.expanduser(load_path)
+        ckpt = tf.train.Checkpoint(model=actor_critic)
+        manager = tf.train.CheckpointManager(ckpt, load_path, max_to_keep=5)
+        ckpt.restore(manager.latest_checkpoint)
 
     # set env
     with SC2EnvWrapper(
@@ -243,12 +253,27 @@ def train(env_name, batch_size, minibatch_size, epochs):
             )
             print("----------------------------")
 
+        # save model
+        if save_model:
+            print("saving model ...")
+            save_path = osp.expanduser(saved_model_dir)
+            ckpt = tf.train.Checkpoint(model=actor_critic)
+            manager = tf.train.CheckpointManager(ckpt, save_path, max_to_keep=5)
+            manager.save()
+
 
 def main(argv):
     epochs = 10
     batch_size = 320
-    minibatch_size = 32
-    train(FLAGS.env_name, batch_size, minibatch_size, epochs)
+    minibatch_size = 64
+    train(
+        FLAGS.env_name,
+        batch_size,
+        minibatch_size,
+        epochs,
+        save_model=True,
+        load_path="saved_model/20200502-150952",
+    )
 
 
 if __name__ == "__main__":
