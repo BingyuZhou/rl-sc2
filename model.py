@@ -66,6 +66,7 @@ class Actor_Critic(keras.Model):
         #                                           activation=tf.nn.relu)
         # core
         self.flat = keras.layers.Flatten(name="core_flatten")
+        self.layer_norm = keras.layers.LayerNormalization()
         """
         Output
         """
@@ -90,7 +91,16 @@ class Actor_Critic(keras.Model):
     def set_act_spec(self, action_spec):
         self.action_spec = action_spec
 
-    def call(self, player, home_away_race, upgrades, available_act, minimap):
+    def call(
+        self,
+        player,
+        home_away_race,
+        upgrades,
+        available_act,
+        minimap,
+        step=None,
+        training=True,
+    ):
         """
         Embedding of inputs
         """
@@ -109,9 +119,8 @@ class Actor_Critic(keras.Model):
         embed_available_act = self.embed_available_act(available_act)
 
         scalar_out = tf.concat(
-            [embed_player, embed_race, embed_upgrades, embed_available_act], axis=1
+            [embed_player, embed_race, embed_upgrades, embed_available_act], axis=-1
         )
-        # print("scalar_out: {}".format(scalar_out.shape))
         """ 
         Map features 
         
@@ -138,6 +147,20 @@ class Actor_Critic(keras.Model):
 
         one_hot_minimap = one_hot_map(minimap)
         embed_minimap = self.embed_minimap(one_hot_minimap)
+        if step is not None:
+            with train_summary_writer.as_default():
+                tf.summary.image(
+                    "embed_minimap",
+                    tf.reshape(embed_minimap, (-1, MINIMAP_RES, MINIMAP_RES, 1)),
+                    step=step,
+                    max_outputs=5,
+                )
+                tf.summary.image(
+                    "input_minimap",
+                    tf.reshape(one_hot_minimap, (-1, MINIMAP_RES, MINIMAP_RES, 1)),
+                    step=step,
+                    max_outputs=8,
+                )
         assert embed_minimap.shape[1] == MINIMAP_RES
         # embed_minimap = self.embed_minimap_2(embed_minimap)
         # embed_minimap = self.embed_minimap_3(embed_minimap)
@@ -159,6 +182,9 @@ class Actor_Critic(keras.Model):
         )
         core_out = tf.concat([scalar_out_2d, embed_minimap], axis=-1, name="core")
         core_out_flat = self.flat(core_out)
+        # core_out_flat = self.layer_norm(core_out_flat)
+        # core_out_flat = tf.nn.relu(core_out_flat)
+
         """
         Decision output
         """
@@ -205,7 +231,9 @@ class Actor_Critic(keras.Model):
 
     def step(self, player, home_away_race, upgrades, available_act, minimap):
         """Sample actions and compute logp(a|s)"""
-        out = self.call(player, home_away_race, upgrades, available_act, minimap)
+        out = self.call(
+            player, home_away_race, upgrades, available_act, minimap, training=False
+        )
 
         for key in out:
             if key != "value" and key != "action_id":
@@ -331,7 +359,9 @@ class Actor_Critic(keras.Model):
         adv,
     ):
         # expection grad log
-        out = self.call(player, home_away_race, upgrades, available_act, minimap)
+        out = self.call(
+            player, home_away_race, upgrades, available_act, minimap, step=step
+        )
 
         # new pi(a|s)
         logp = self.logp_a(act_id, act_args, act_mask, out)

@@ -263,7 +263,7 @@ def train(
 
 
 def main(argv):
-    epochs = 10
+    epochs = 5
     batch_size = 320
     minibatch_size = 64
     train(
@@ -272,7 +272,7 @@ def main(argv):
         minibatch_size,
         epochs,
         save_model=True,
-        load_path="saved_model/20200502-150952",
+        # load_path="saved_model/20200502-152222",
     )
 
 
