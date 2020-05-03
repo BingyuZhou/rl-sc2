@@ -7,7 +7,6 @@ from buffer import Buffer
 from model import Actor_Critic
 from utils import indToXY, XYToInd
 from constants import *
-
 from log import train_summary_writer, saved_model_dir
 
 import tensorflow as tf
@@ -38,6 +37,8 @@ flags.DEFINE_enum(
 )
 flags.DEFINE_integer("game_steps_per_episode", None, "Game steps per episode.")
 flags.DEFINE_bool("disable_fog", False, "Whether to disable Fog of War.")
+flags.DEFINE_bool("save_model", False, "Whether to save model.")
+flags.DEFINE_string("load_model_path", None, "The path to load model.")
 
 
 def preprocess(obs):
@@ -263,7 +264,7 @@ def train(
 
 
 def main(argv):
-    epochs = 5
+    epochs = 10
     batch_size = 320
     minibatch_size = 64
     train(
@@ -271,8 +272,8 @@ def main(argv):
         batch_size,
         minibatch_size,
         epochs,
-        save_model=True,
-        # load_path="saved_model/20200502-152222",
+        save_model=FLAGS.save_model,
+        load_path=FLAGS.load_model_path,
     )
 
 

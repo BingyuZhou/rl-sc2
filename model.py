@@ -139,7 +139,9 @@ class Actor_Critic(keras.Model):
                 if feature.type is features.FeatureType.CATEGORICAL:
                     one_hot = tf.one_hot(obs[:, :, :, ind], depth=feature.scale)
                 else:  # features.FeatureType.SCALAR
-                    one_hot = tf.cast(obs[:, :, :, ind:], dtype=tf.float32) / 255.0
+                    one_hot = (
+                        tf.cast(obs[:, :, :, ind : ind + 1], dtype=tf.float32) / 255.0
+                    )
 
                 out.append(one_hot)
             out = tf.concat(out, axis=-1)
@@ -151,17 +153,16 @@ class Actor_Critic(keras.Model):
             with train_summary_writer.as_default():
                 tf.summary.image(
                     "embed_minimap",
-                    tf.reshape(embed_minimap, (-1, MINIMAP_RES, MINIMAP_RES, 1)),
+                    tf.transpose(embed_minimap[2:3, :, :, :], (3, 1, 2, 0)),
                     step=step,
                     max_outputs=5,
                 )
                 tf.summary.image(
                     "input_minimap",
-                    tf.reshape(one_hot_minimap, (-1, MINIMAP_RES, MINIMAP_RES, 1)),
+                    one_hot_minimap[:, :, :, 29:30],
                     step=step,
-                    max_outputs=8,
+                    max_outputs=5,
                 )
-        assert embed_minimap.shape[1] == MINIMAP_RES
         # embed_minimap = self.embed_minimap_2(embed_minimap)
         # embed_minimap = self.embed_minimap_3(embed_minimap)
 
