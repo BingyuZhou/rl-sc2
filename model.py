@@ -28,10 +28,11 @@ class GLU(keras.Model):
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
-        self.optimizer = keras.optimizers.Adam(learning_rate=1e-4)
-        self.clip_range = 0.2
+        self.optimizer = keras.optimizers.SGD(learning_rate=3e-4)
+        self.clip_range = 0.3
         self.v_coef = 0.5
-        self.max_grad_norm = 0.5
+        self.entropy_coef = 0.05
+        self.max_grad_norm = 0.8
 
         # upgrades
         self.embed_upgrads = keras.layers.Dense(64, activation="relu")
@@ -382,18 +383,22 @@ class Actor_Critic(keras.Model):
         v_clip_loss = tf.square(v_clip - ret)
 
         v_loss = tf.square(out["value"] - ret)
-        v_loss = tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
+        v_loss = 0.5 * tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
 
         approx_entropy = entropy(logp)
         approx_kl = tf.reduce_mean(tf.square(old_logp - logp))
+        clip_frac = tf.reduce_mean(
+            tf.cast(tf.greater(tf.abs(delta_pi - 1.0), self.clip_range), tf.float32)
+        )
 
         with train_summary_writer.as_default():
             tf.summary.scalar("loss/pg_loss", pg_loss, step)
             tf.summary.scalar("loss/v_loss", v_loss, step)
             tf.summary.scalar("stat/approx_entropy", approx_entropy, step)
             tf.summary.scalar("stat/approx_kl", approx_kl, step)
+            tf.summary.scalar("stat/clip_frac", clip_frac, step)
 
-        return pg_loss + self.v_coef * v_loss
+        return pg_loss + self.v_coef * v_loss - self.entropy_coef * approx_entropy
 
     @tf.function
     def train_step(

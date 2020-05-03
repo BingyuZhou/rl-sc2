@@ -130,6 +130,9 @@ def train(
             step_type, reward, _, obs = timestep[0]
             obs = preprocess(obs)
 
+            ep_ret = []  # episode return (score)
+            ep_rew = 0
+
             # fill in recorded trajectories
             while True:
                 tf_obs = (
@@ -161,6 +164,8 @@ def train(
                 buffer.add_rew(reward)
                 obs = preprocess(obs)
 
+                ep_rew += reward
+
                 if step_type == step_type.LAST or buffer.is_full():
                     if step_type == step_type.LAST:
                         buffer.finalize(reward)
@@ -172,6 +177,10 @@ def train(
                         )
                         val, _, _, _, _ = actor_critic.step(*tf_obs)
                         buffer.finalize(val)
+
+                    ep_rew += reward
+                    ep_ret.append(ep_rew)
+                    ep_rew = 0
 
                     if buffer.is_full():
                         break
@@ -231,7 +240,7 @@ def train(
 
             batch_loss = np.mean(mb_loss)
 
-            return batch_loss, buffer.batch_ret, buffer.batch_len
+            return batch_loss, ep_ret, buffer.batch_len
 
         num_train_per_epoch = batch_size // minibatch_size
         for i in range(epochs):
@@ -264,9 +273,9 @@ def train(
 
 
 def main(argv):
-    epochs = 10
-    batch_size = 320
-    minibatch_size = 64
+    epochs = 50
+    batch_size = 480
+    minibatch_size = 48
     train(
         FLAGS.env_name,
         batch_size,
