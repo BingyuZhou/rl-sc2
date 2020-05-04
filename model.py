@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
-from utils import indToXY, XYToInd, entropy
+from utils import indToXY, XYToInd, compute_over_actions, entropy
 from constants import *
 from log import train_summary_writer
 
@@ -28,11 +28,16 @@ class GLU(keras.Model):
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
-        self.optimizer = keras.optimizers.SGD(learning_rate=3e-4)
+        self.optimizer = keras.optimizers.RMSprop(
+            learning_rate=3e-4, rho=0.99, epsilon=1e-5
+        )
+        # self.optimizer = keras.optimizers.Adam(
+        #     learning_rate=3e-5, beta_1=0, beta_2=0.99, epsilon=1e-5
+        # )
         self.clip_range = 0.3
         self.v_coef = 0.5
-        self.entropy_coef = 0.05
-        self.max_grad_norm = 0.8
+        self.entropy_coef = 1e-3
+        self.max_grad_norm = 1.0
 
         # upgrades
         self.embed_upgrads = keras.layers.Dense(64, activation="relu")
@@ -67,7 +72,8 @@ class Actor_Critic(keras.Model):
         #                                           activation=tf.nn.relu)
         # core
         self.flat = keras.layers.Flatten(name="core_flatten")
-        self.layer_norm = keras.layers.LayerNormalization()
+        self.core_fc = keras.layers.Dense(256, activation="relu", name="core_fc")
+        # self.layer_norm = keras.layers.LayerNormalization()
         """
         Output
         """
@@ -184,6 +190,7 @@ class Actor_Critic(keras.Model):
         )
         core_out = tf.concat([scalar_out_2d, embed_minimap], axis=-1, name="core")
         core_out_flat = self.flat(core_out)
+        core_out_flat = self.core_fc(core_out_flat)
         # core_out_flat = self.layer_norm(core_out_flat)
         # core_out_flat = tf.nn.relu(core_out_flat)
 
@@ -298,7 +305,7 @@ class Actor_Critic(keras.Model):
             logp_a,
         )
 
-    def logp_a(self, action_ids, action_args, action_mask, pi):
+    def logp_a(self, action_ids, action_args, action_mask, available_act, pi):
         """logp(a|s)"""
         # from logits to logp
         logp_pi = {}
@@ -308,39 +315,44 @@ class Actor_Critic(keras.Model):
 
         # action function id prob
         assert len(pi["action_id"].shape) == 2
+        pi_act = tf.nn.softmax(pi["action_id"]) * available_act
+        pi_act /= tf.reduce_sum(pi_act, axis=-1, keepdims=True)
+        logpi_act = tf.math.log(tf.maximum(pi_act, EPS))
         logp = tf.reduce_sum(
-            logp_pi["action_id"] * tf.one_hot(action_ids, depth=NUM_ACTION_FUNCTIONS),
-            axis=-1,
+            logpi_act * tf.one_hot(action_ids, depth=NUM_ACTION_FUNCTIONS), axis=-1,
         )
         # args
         assert len(action_args.shape) == 2
-        logp_args = []
-        for ind, arg_type in enumerate(actions.TYPES):
+        for arg_type in actions.TYPES:
             if arg_type.name in ["screen", "screen2", "minimap"]:
-                logp_args.append(
+                logp_pi = tf.nn.log_softmax(pi["target_location"], axis=-1)
+                tf.debugging.check_numerics(logp_pi, "Bad logp(a|s)")
+
+                logp += (
                     tf.reduce_sum(
-                        logp_pi["target_location"]
+                        logp_pi
                         * tf.one_hot(
-                            action_args[:, ind], depth=MINIMAP_RES * MINIMAP_RES
+                            action_args[:, arg_type.id], depth=MINIMAP_RES * MINIMAP_RES
                         ),
                         axis=-1,
                     )
+                    * action_mask[:, arg_type.id]
                 )
-            else:
-                if arg_type.name in logp_pi.keys():
-                    logp_args.append(
-                        tf.reduce_sum(
-                            logp_pi[arg_type.name]
-                            * tf.one_hot(
-                                action_args[:, ind], depth=np.prod(arg_type.sizes)
-                            ),
-                            axis=-1,
-                        )
+
+            if arg_type.name in pi.keys():
+                logp_pi = tf.nn.log_softmax(pi[arg_type.name], axis=-1)
+                tf.debugging.check_numerics(logp_pi, "Bad logp(a|s)")
+
+                logp += (
+                    tf.reduce_sum(
+                        logp_pi
+                        * tf.one_hot(
+                            action_args[:, arg_type.id], depth=np.prod(arg_type.sizes),
+                        ),
+                        axis=-1,
                     )
-                else:
-                    logp_args.append(tf.constant([0] * logp.shape[0], dtype=tf.float32))
-        # mask out unused args for each sampled action id
-        logp += tf.reduce_sum(action_mask * tf.stack(logp_args, axis=-1), axis=-1)
+                    * action_mask[:, arg_type.id]
+                )
 
         return logp
 
@@ -366,7 +378,7 @@ class Actor_Critic(keras.Model):
         )
 
         # new pi(a|s)
-        logp = self.logp_a(act_id, act_args, act_mask, out)
+        logp = self.logp_a(act_id, act_args, act_mask, available_act, out)
 
         delta_pi = tf.exp(logp - old_logp)
 
@@ -385,7 +397,9 @@ class Actor_Critic(keras.Model):
         v_loss = tf.square(out["value"] - ret)
         v_loss = 0.5 * tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
 
-        approx_entropy = entropy(logp)
+        approx_entropy = tf.reduce_mean(
+            compute_over_actions(entropy, out, available_act, act_mask)
+        )
         approx_kl = tf.reduce_mean(tf.square(old_logp - logp))
         clip_frac = tf.reduce_mean(
             tf.cast(tf.greater(tf.abs(delta_pi - 1.0), self.clip_range), tf.float32)

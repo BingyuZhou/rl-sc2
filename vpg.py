@@ -248,17 +248,19 @@ def train(
                 tracing_on = True
             else:
                 tracing_on = False
-            batch_loss, batch_ret, batch_len = train_one_epoch(
+            batch_loss, cumulative_rew, batch_len = train_one_epoch(
                 i * num_train_per_epoch, tracing_on
             )
             with train_summary_writer.as_default():
-                tf.summary.scalar("batch/batch_ret", np.mean(batch_ret), step=i)
+                tf.summary.scalar(
+                    "batch/cumulative_rewards", np.mean(cumulative_rew), step=i
+                )
                 tf.summary.scalar("batch/batch_len", np.mean(batch_len), step=i)
                 tf.summary.scalar("loss/batch_loss", batch_loss, step=i)
             print("----------------------------")
             print(
                 "epoch {0:2d} loss {1:.3f} batch_ret {2:.3f} batch_len {3:.3f}".format(
-                    i, batch_loss, np.mean(batch_ret), np.mean(batch_len)
+                    i, batch_loss, np.mean(cumulative_rew), np.mean(batch_len)
                 )
             )
             print("----------------------------")
@@ -273,9 +275,9 @@ def train(
 
 
 def main(argv):
-    epochs = 50
+    epochs = 1000
     batch_size = 480
-    minibatch_size = 48
+    minibatch_size = 32
     train(
         FLAGS.env_name,
         batch_size,
