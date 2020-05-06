@@ -27,7 +27,16 @@ def discount_cumsum(x, discount):
 class Buffer:
     """Replay buffer"""
 
-    def __init__(self, batch_size, minibatch_size, width, height, gamma=0.99, lam=0.95):
+    def __init__(
+        self,
+        batch_size,
+        minibatch_size,
+        width,
+        height,
+        action_spec,
+        gamma=0.99,
+        lam=0.95,
+    ):
         # obs
         self.batch_player = []
         self.batch_home_away_race = []
@@ -58,6 +67,7 @@ class Buffer:
         self.batch_size = batch_size
         assert batch_size % minibatch_size == 0
         self.minibatch_size = minibatch_size
+        self.action_spec = action_spec
 
     def add(
         self,
@@ -80,6 +90,10 @@ class Buffer:
         self.batch_minimap.append(minimap)
 
         self.batch_act_id.append(act_id)
+        # reorder act_args so that its arguemnts order in increasing order
+        arg_order = np.asarray([a.id for a in self.action_spec.functions[act_id].args])
+        index_order = np.argsort(arg_order)
+        act_args = np.asarray(act_args)[index_order]
         for arg in act_args:
             if len(arg) > 1:
                 # tansfer spatial args to scalar
@@ -154,7 +168,7 @@ class Buffer:
             tf.constant(np.asarray(self.batch_upgrades)[slices]),
             tf.constant(np.asarray(self.batch_available_act)[slices]),
             tf.constant(np.asarray(self.batch_minimap)[slices]),
-            tf.constant(np.asarray(self.batch_act_id)[slices]),
+            tf.constant(np.asarray(self.batch_act_id)[slices], dtype=tf.int32),
             tf.constant(self.batch_act_args[slices], dtype=tf.int32),
             tf.constant(np.asarray(self.batch_act_masks)[slices]),
             tf.constant(np.asarray(self.batch_logp)[slices], dtype=tf.float32),

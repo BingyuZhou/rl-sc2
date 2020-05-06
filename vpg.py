@@ -123,7 +123,13 @@ def train(
 
         def train_one_epoch(step, tracing_on):
             # initialize replay buffer
-            buffer = Buffer(batch_size, minibatch_size, MINIMAP_RES, MINIMAP_RES)
+            buffer = Buffer(
+                batch_size,
+                minibatch_size,
+                MINIMAP_RES,
+                MINIMAP_RES,
+                env.action_spec()[0],
+            )
 
             # initial observation
             timestep = env.reset()
@@ -161,6 +167,7 @@ def train(
                 step_type, reward, _, obs = env.step(
                     [actions.FunctionCall(act_id.numpy().item(), sc2act_args)]
                 )[0]
+                # print("action:{}: {} reward {}".format(act_id.numpy().item(), sc2act_args, reward))
                 buffer.add_rew(reward)
                 obs = preprocess(obs)
 
