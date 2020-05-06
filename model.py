@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
-from utils import indToXY, XYToInd, compute_over_actions, entropy
+from utils import indToXY, XYToInd, compute_over_actions, entropy, log_prob
 from constants import *
 from log import train_summary_writer
 
@@ -28,14 +28,9 @@ class GLU(keras.Model):
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
-        self.optimizer = keras.optimizers.RMSprop(
-            learning_rate=3e-4, rho=0.99, epsilon=1e-5
-        )
-        # self.optimizer = keras.optimizers.Adam(
-        #     learning_rate=3e-5, beta_1=0, beta_2=0.99, epsilon=1e-5
-        # )
-        self.clip_range = 0.3
-        self.v_coef = 0.5
+        self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
+        self.clip_range = 0.2
+        self.v_coef = 0.8
         self.entropy_coef = 1e-3
         self.max_grad_norm = 1.0
 

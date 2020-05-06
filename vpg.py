@@ -5,7 +5,7 @@ from __future__ import print_function
 
 from buffer import Buffer
 from model import Actor_Critic
-from utils import indToXY, XYToInd
+from utils import indToXY, XYToInd, explained_variance
 from constants import *
 from log import train_summary_writer, saved_model_dir
 
@@ -211,6 +211,9 @@ def train(
                     ret,
                     adv,
                 ) = buffer.minibatch(ind)
+
+                assert ret.shape == val.shape
+                assert logp.shape == adv.shape
                 if tracing_on:
                     tf.summary.trace_on(graph=True, profiler=False)
 
@@ -240,7 +243,12 @@ def train(
 
             batch_loss = np.mean(mb_loss)
 
-            return batch_loss, ep_ret, buffer.batch_len
+            return (
+                batch_loss,
+                ep_ret,
+                buffer.batch_ret,
+                np.asarray(buffer.batch_vals, dtype=np.float32),
+            )
 
         num_train_per_epoch = batch_size // minibatch_size
         for i in range(epochs):
@@ -248,30 +256,31 @@ def train(
                 tracing_on = True
             else:
                 tracing_on = False
-            batch_loss, cumulative_rew, batch_len = train_one_epoch(
+            batch_loss, cumulative_rew, batch_ret, batch_vals = train_one_epoch(
                 i * num_train_per_epoch, tracing_on
             )
+            ev = explained_variance(batch_vals, batch_ret)
             with train_summary_writer.as_default():
                 tf.summary.scalar(
                     "batch/cumulative_rewards", np.mean(cumulative_rew), step=i
                 )
-                tf.summary.scalar("batch/batch_len", np.mean(batch_len), step=i)
+                tf.summary.scalar("batch/ev", ev, step=i)
                 tf.summary.scalar("loss/batch_loss", batch_loss, step=i)
             print("----------------------------")
             print(
-                "epoch {0:2d} loss {1:.3f} batch_ret {2:.3f} batch_len {3:.3f}".format(
-                    i, batch_loss, np.mean(cumulative_rew), np.mean(batch_len)
+                "epoch {0:2d} loss {1:.3f} batch_ret {2:.3f}".format(
+                    i, batch_loss, np.mean(cumulative_rew)
                 )
             )
             print("----------------------------")
 
-        # save model
-        if save_model:
-            print("saving model ...")
-            save_path = osp.expanduser(saved_model_dir)
-            ckpt = tf.train.Checkpoint(model=actor_critic)
-            manager = tf.train.CheckpointManager(ckpt, save_path, max_to_keep=5)
-            manager.save()
+            # save model
+            if save_model and i % 15 == 0:
+                print("saving model ...")
+                save_path = osp.expanduser(saved_model_dir)
+                ckpt = tf.train.Checkpoint(model=actor_critic)
+                manager = tf.train.CheckpointManager(ckpt, save_path, max_to_keep=3)
+                manager.save()
 
 
 def main(argv):

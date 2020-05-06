@@ -53,3 +53,24 @@ def compute_over_actions(func, out_logits, available_act_mask, act_arg_mask):
             p = tf.nn.softmax(out_logits["target_location"], axis=-1)
             ent += func(p) * act_arg_mask[:, arg.id]
     return ent
+
+
+def explained_variance(ypred, y):
+    """
+    Computes fraction of variance that ypred explains about y.
+    Returns 1 - Var[y-ypred] / Var[y]
+
+    interpretation:
+        ev=0  =>  might as well have predicted zero
+        ev=1  =>  perfect prediction
+        ev<0  =>  worse than just predicting zero
+    
+    From OpenAI baseline code.
+    """
+    assert y.ndim == 1 and ypred.ndim == 1
+    vary = np.var(y)
+    return np.nan if vary == 0 else 1 - np.var(y - ypred) / vary
+
+
+def log_prob(label, logits):
+    return tf.nn.sparse_softmax_cross_entropy_with_logits(label, logits)
