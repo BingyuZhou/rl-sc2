@@ -73,4 +73,4 @@ def explained_variance(ypred, y):
 
 
 def log_prob(label, logits):
-    return tf.nn.sparse_softmax_cross_entropy_with_logits(label, logits)
+    return -tf.nn.sparse_softmax_cross_entropy_with_logits(label, logits)

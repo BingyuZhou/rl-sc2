@@ -28,70 +28,69 @@ class GLU(keras.Model):
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
-        with tf.name_scope("ActorCritic") as scope:
-            self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
-            self.clip_range = 0.2
-            self.v_coef = 0.8
-            self.entropy_coef = 1e-3
-            self.max_grad_norm = 1.0
+        # self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
+        self.optimizer = keras.optimizers.Adam(learning_rate=3e-4)
+        self.clip_ratio = 0.3
+        self.clip_value = 0.5
+        self.v_coef = 0.5
+        self.entropy_coef = 1e-2
+        self.max_grad_norm = 0.0
 
-            # upgrades
-            self.embed_upgrads = keras.layers.Dense(64, activation="relu")
-            # player (agent statistics)
-            self.embed_player = keras.layers.Dense(64, activation="relu")
-            # available_actions
-            self.embed_available_act = keras.layers.Dense(64, activation="relu")
-            # race_requested
-            self.embed_race = keras.layers.Dense(64, activation="relu")
-            # minimap feature
-            self.embed_minimap = keras.layers.Conv2D(
-                32, 1, padding="valid", activation="relu"
-            )
-            self.embed_minimap_2 = keras.layers.Conv2D(
-                64, 4, 2, padding="same", activation="relu"
-            )
-            self.embed_minimap_3 = keras.layers.Conv2D(
-                128, 3, 2, padding="same", activation="relu"
-            )
-            # screen feature
-            # self.embed_screen = keras.layers.Conv2D(32,
-            #                                         1,
-            #                                         padding='same',
-            #                                         activation=tf.nn.relu)
-            # self.embed_screen_2 = keras.layers.Conv2D(64,
-            #                                           3,
-            #                                           padding='same',
-            #                                           activation=tf.nn.relu)
-            # self.embed_screen_3 = keras.layers.Conv2D(128,
-            #                                           3,
-            #                                           padding='same',
-            #                                           activation=tf.nn.relu)
-            # core
-            self.flat = keras.layers.Flatten(name="core_flatten")
-            self.core_fc = keras.layers.Dense(256, activation="relu", name="core_fc")
-            # self.layer_norm = keras.layers.LayerNormalization()
-            """
-            Output
-            """
-            # TODO: autoregressive embedding
-            self.action_id_layer = keras.layers.Dense(256, name="action_id_out")
-            self.action_id_gate = GLU(input_size=256, out_size=NUM_ACTION_FUNCTIONS)
-            # self.delay_logits = keras.layers.Dense(128, name="delay_out")
-            self.queued_logits = keras.layers.Dense(2, name="queued_out")
-            self.select_point_logits = keras.layers.Dense(4, name="select_point_out")
-            self.select_add_logits = keras.layers.Dense(2, name="select_add_out")
-            # self.select_unit_act=keras.layers.Dense(4)
-            # self.selec_unit_id_logits=keras.layers.Dense(64)
-            self.select_worker_logits = keras.layers.Dense(4, name="select_worker_out")
-            # self.target_unit_logits = keras.layers.Dense(32, name="target_unit_out")
-            self.target_location_flat = keras.layers.Flatten(
-                name="target_location_flatten"
-            )
-            self.target_location_logits = keras.layers.Conv2D(
-                1, 1, padding="same", name="target_location_out"
-            )
+        # upgrades
+        self.embed_upgrads = keras.layers.Dense(64, activation="relu")
+        # player (agent statistics)
+        self.embed_player = keras.layers.Dense(64, activation="relu")
+        # available_actions
+        self.embed_available_act = keras.layers.Dense(64, activation="relu")
+        # race_requested
+        self.embed_race = keras.layers.Dense(64, activation="relu")
+        # minimap feature
+        self.embed_minimap = keras.layers.Conv2D(
+            32, 1, padding="valid", activation="relu"
+        )
+        # self.embed_minimap_2 = keras.layers.Conv2D(
+        #     64, 4, 2, padding="same", activation="relu"
+        # )
+        # self.embed_minimap_3 = keras.layers.Conv2D(
+        #     128, 3, 2, padding="same", activation="relu"
+        # )
+        # screen feature
+        # self.embed_screen = keras.layers.Conv2D(32,
+        #                                         1,
+        #                                         padding='same',
+        #                                         activation=tf.nn.relu)
+        # self.embed_screen_2 = keras.layers.Conv2D(64,
+        #                                           3,
+        #                                           padding='same',
+        #                                           activation=tf.nn.relu)
+        # self.embed_screen_3 = keras.layers.Conv2D(128,
+        #                                           3,
+        #                                           padding='same',
+        #                                           activation=tf.nn.relu)
+        # core
+        self.flat = keras.layers.Flatten(name="core_flatten")
+        self.core_fc = keras.layers.Dense(256, activation="relu", name="core_fc")
+        # self.layer_norm = keras.layers.LayerNormalization()
+        """
+        Output
+        """
+        # TODO: autoregressive embedding
+        self.action_id_layer = keras.layers.Dense(256, name="action_id_out")
+        self.action_id_gate = GLU(input_size=256, out_size=NUM_ACTION_FUNCTIONS)
+        # self.delay_logits = keras.layers.Dense(128, name="delay_out")
+        self.queued_logits = keras.layers.Dense(2, name="queued_out")
+        self.select_point_logits = keras.layers.Dense(4, name="select_point_out")
+        self.select_add_logits = keras.layers.Dense(2, name="select_add_out")
+        # self.select_unit_act=keras.layers.Dense(4)
+        # self.selec_unit_id_logits=keras.layers.Dense(64)
+        self.select_worker_logits = keras.layers.Dense(4, name="select_worker_out")
+        # self.target_unit_logits = keras.layers.Dense(32, name="target_unit_out")
+        self.target_location_flat = keras.layers.Flatten(name="target_location_flatten")
+        self.target_location_logits = keras.layers.Conv2D(
+            1, 1, padding="same", name="target_location_out"
+        )
 
-            self.value = keras.layers.Dense(1, name="value_out")
+        self.value = keras.layers.Dense(1, name="value_out")
 
     def set_act_spec(self, action_spec):
         self.action_spec = action_spec
@@ -400,25 +399,25 @@ class Actor_Critic(keras.Model):
 
         pg_loss_1 = delta_pi * adv
         pg_loss_2 = (
-            tf.clip_by_value(delta_pi, 1 - self.clip_range, 1 + self.clip_range) * adv
+            tf.clip_by_value(delta_pi, 1 - self.clip_ratio, 1 + self.clip_ratio) * adv
         )
 
         pg_loss = -tf.reduce_mean(tf.minimum(pg_loss_1, pg_loss_2))
 
         v_clip = old_v + tf.clip_by_value(
-            out["value"] - old_v, -self.clip_range, self.clip_range
+            out["value"] - old_v, -self.clip_value, self.clip_value
         )
         v_clip_loss = tf.square(v_clip - ret)
 
         v_loss = tf.square(out["value"] - ret)
-        v_loss = 0.5 * tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
+        v_loss = tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
 
         approx_entropy = tf.reduce_mean(
             compute_over_actions(entropy, out, available_act, act_mask), name="entropy"
         )
         approx_kl = tf.reduce_mean(tf.square(old_logp - logp), name="kl")
         clip_frac = tf.reduce_mean(
-            tf.cast(tf.greater(tf.abs(delta_pi - 1.0), self.clip_range), tf.float32),
+            tf.cast(tf.greater(tf.abs(delta_pi - 1.0), self.clip_ratio), tf.float32),
             name="clip_frac",
         )
 
@@ -470,8 +469,9 @@ class Actor_Critic(keras.Model):
             )
         grad = tape.gradient(ls, self.trainable_variables)
         for g in grad:
-            tf.debugging.check_numerics(g, "Bad grad")
+            tf.debugging.check_numerics(g, "Bad grad {}".format(g))
         # clip grad (https://arxiv.org/pdf/1211.5063.pdf)
-        grad, _ = tf.clip_by_global_norm(grad, self.max_grad_norm)
+        if self.max_grad_norm > 0.0:
+            grad, _ = tf.clip_by_global_norm(grad, self.max_grad_norm)
         self.optimizer.apply_gradients(zip(grad, self.trainable_variables))
         return ls

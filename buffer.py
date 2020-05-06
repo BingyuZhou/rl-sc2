@@ -123,7 +123,7 @@ class Buffer:
         deltas = self.ep_rew[:-1] + self.gamma * self.ep_vals[1:] - self.ep_vals[:-1]
         self.batch_adv.append(discount_cumsum(deltas, self.gamma * self.lam))
 
-        self.batch_ret.append(self.batch_adv[-1] + self.ep_vals[:-1])
+        self.batch_ret.append(discount_cumsum(self.ep_rew, self.gamma)[:-1])
 
         self.batch_len.append(self.ep_len)
 
