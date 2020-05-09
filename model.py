@@ -467,6 +467,10 @@ class Actor_Critic(keras.Model):
                 adv,
             )
         grad = tape.gradient(ls, self.trainable_variables)
+        with train_summary_writer.as_default():
+            tf.summary.scalar(
+                "batch/gradient_norm", tf.reduce_mean([tf.norm(g) for g in grad]), step
+            )
         for g in grad:
             tf.debugging.check_numerics(g, "Bad grad {}".format(g))
         # clip grad (https://arxiv.org/pdf/1211.5063.pdf)
