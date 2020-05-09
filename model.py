@@ -249,7 +249,7 @@ class Actor_Critic(keras.Model):
         prob_act = tf.math.softmax(out["action_id"]) * available_act
         # renormalize
         prob_act /= EPS + tf.reduce_sum(prob_act, axis=-1, keepdims=True)
-        log_prob_act = tf.math.log(tf.maximum(prob_act, EPS))
+        log_prob_act = tf.math.log(prob_act + EPS)
 
         action_id = tf.random.categorical(log_prob_act, 1)
         while tf.less_equal(available_act[:, action_id.numpy().item()], 0.9):
@@ -319,8 +319,7 @@ class Actor_Critic(keras.Model):
 
         # action function id prob
         assert len(pi["action_id"].shape) == 2
-        action_log_prob = log_prob(action_ids, pi["action_id"])
-        logp = action_log_prob
+        logp = log_prob(action_ids, pi["action_id"])
 
         # pi_act = tf.nn.softmax(pi["action_id"]) * available_act
         # pi_act /= tf.reduce_sum(pi_act, axis=-1, keepdims=True)

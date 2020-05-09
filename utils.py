@@ -23,7 +23,7 @@ def count_vars(trainable_var):
 
 
 def entropy(prob, is_masked=False):
-    log_p = tf.math.log(tf.maximum(prob, EPS))
+    log_p = tf.math.log(prob + EPS)
     ent = -tf.reduce_sum(prob * log_p, axis=-1)
     # normalize by actions available
     if is_masked:
