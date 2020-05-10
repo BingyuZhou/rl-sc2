@@ -164,8 +164,8 @@ class Buffer:
         slices = self.ind[start:end]
         return (
             tf.constant(np.asarray(self.batch_player)[slices]),
-            tf.constant(np.asarray(self.batch_home_away_race)[slices]),
-            tf.constant(np.asarray(self.batch_upgrades)[slices]),
+            # tf.constant(np.asarray(self.batch_home_away_race)[slices]),
+            # tf.constant(np.asarray(self.batch_upgrades)[slices]),
             tf.constant(np.asarray(self.batch_available_act)[slices]),
             tf.constant(np.asarray(self.batch_minimap)[slices]),
             tf.constant(np.asarray(self.batch_act_id)[slices], dtype=tf.int32),

@@ -113,7 +113,7 @@ def train(
         map_name=env_name,
         players=[sc2_env.Agent(sc2_env.Race.random)],
         agent_interface_format=sc2_env.parse_agent_interface_format(
-            feature_minimap=MINIMAP_RES, feature_screen=1
+            feature_minimap=MINIMAP_RES, feature_screen=MINIMAP_RES
         ),
         step_mul=FLAGS.step_mul,
         game_steps_per_episode=FLAGS.game_steps_per_episode,
@@ -206,8 +206,8 @@ def train(
             for ind in range(batch_size // minibatch_size):
                 (
                     player,
-                    home_away_race,
-                    upgrades,
+                    # home_away_race,
+                    # upgrades,
                     available_act,
                     minimap,
                     act_id,
@@ -228,8 +228,8 @@ def train(
                     actor_critic.train_step(
                         tf.constant(step, dtype=tf.int64),
                         player,
-                        home_away_race,
-                        upgrades,
+                        # home_away_race,
+                        # upgrades,
                         available_act,
                         minimap,
                         act_id,

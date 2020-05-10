@@ -28,29 +28,35 @@ class GLU(keras.Model):
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
-        # self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
-        self.optimizer = keras.optimizers.Adam(learning_rate=3e-4)
+        self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
+        # self.optimizer = keras.optimizers.Adam(learning_rate=3e-4)
         self.clip_ratio = 0.3
         self.clip_value = 0.5
         self.v_coef = 0.5
         self.entropy_coef = 1e-2
-        self.max_grad_norm = 0.0
+        self.max_grad_norm = 0.5
 
         # upgrades
-        self.embed_upgrads = keras.layers.Dense(64, activation="relu")
+        self.embed_upgrads = keras.layers.Dense(
+            64, activation="relu", name="embed_upgrads"
+        )
         # player (agent statistics)
-        self.embed_player = keras.layers.Dense(64, activation="relu")
+        self.embed_player = keras.layers.Dense(
+            64, activation="relu", name="embed_player"
+        )
         # available_actions
-        self.embed_available_act = keras.layers.Dense(64, activation="relu")
+        self.embed_available_act = keras.layers.Dense(
+            64, activation="relu", name="embed_available_act"
+        )
         # race_requested
-        self.embed_race = keras.layers.Dense(64, activation="relu")
+        self.embed_race = keras.layers.Dense(64, activation="relu", name="embed_race")
         # minimap feature
         self.embed_minimap = keras.layers.Conv2D(
-            32, 1, padding="valid", activation="relu"
+            32, 1, padding="same", activation="relu", name="embed_minimap"
         )
-        # self.embed_minimap_2 = keras.layers.Conv2D(
-        #     64, 4, 2, padding="same", activation="relu"
-        # )
+        self.embed_minimap_2 = keras.layers.Conv2D(
+            64, 3, padding="same", activation="relu"
+        )
         # self.embed_minimap_3 = keras.layers.Conv2D(
         #     128, 3, 2, padding="same", activation="relu"
         # )
@@ -98,8 +104,8 @@ class Actor_Critic(keras.Model):
     def call(
         self,
         player,
-        home_away_race,
-        upgrades,
+        # home_away_race,
+        # upgrades,
         available_act,
         minimap,
         step=None,
@@ -113,18 +119,16 @@ class Actor_Critic(keras.Model):
         
         These are embedding of scalar features
         """
-        embed_player = self.embed_player(tf.math.log(player + 1))
+        embed_player = self.embed_player(tf.stop_gradient(tf.math.log(player + 1.0)))
 
-        embed_race = self.embed_race(
-            tf.reshape(tf.one_hot(home_away_race, depth=4), shape=[-1, 8])
-        )
+        # embed_race = self.embed_race(
+        #     tf.reshape(tf.one_hot(home_away_race, depth=4), shape=[-1, 8])
+        # )
 
-        embed_upgrades = self.embed_upgrads(upgrades)
+        # embed_upgrades = self.embed_upgrads(upgrades)
         embed_available_act = self.embed_available_act(available_act)
 
-        scalar_out = tf.concat(
-            [embed_player, embed_race, embed_upgrades, embed_available_act], axis=-1
-        )
+        scalar_out = tf.concat([embed_player, embed_available_act], axis=-1)
         """ 
         Map features 
         
@@ -151,8 +155,9 @@ class Actor_Critic(keras.Model):
             out = tf.concat(out, axis=-1)
             return out
 
-        one_hot_minimap = one_hot_map(minimap)
+        one_hot_minimap = tf.stop_gradient(one_hot_map(minimap))
         embed_minimap = self.embed_minimap(one_hot_minimap)
+        embed_minimap = self.embed_minimap_2(embed_minimap)
         if step is not None:
             with train_summary_writer.as_default():
                 tf.summary.image(
@@ -237,9 +242,7 @@ class Actor_Critic(keras.Model):
 
     def step(self, player, home_away_race, upgrades, available_act, minimap):
         """Sample actions and compute logp(a|s)"""
-        out = self.call(
-            player, home_away_race, upgrades, available_act, minimap, training=False
-        )
+        out = self.call(player, available_act, minimap, training=False)
 
         # for key in out:
         #     if key != "value" and key != "action_id":
@@ -374,8 +377,8 @@ class Actor_Critic(keras.Model):
         self,
         step,
         player,
-        home_away_race,
-        upgrades,
+        # home_away_race,
+        # upgrades,
         available_act,
         minimap,
         act_id,
@@ -387,9 +390,7 @@ class Actor_Critic(keras.Model):
         adv,
     ):
         # expection grad log
-        out = self.call(
-            player, home_away_race, upgrades, available_act, minimap, step=step
-        )
+        out = self.call(player, available_act, minimap, step=step)
 
         # new pi(a|s)
         logp = self.logp_a(act_id, act_args, act_mask, available_act, out)
@@ -434,8 +435,8 @@ class Actor_Critic(keras.Model):
         self,
         step,
         player,
-        home_away_race,
-        upgrades,
+        # home_away_race,
+        # upgrades,
         available_act,
         minimap,
         act_id,
@@ -454,8 +455,8 @@ class Actor_Critic(keras.Model):
             ls = self.loss(
                 step,
                 player,
-                home_away_race,
-                upgrades,
+                # home_away_race,
+                # upgrades,
                 available_act,
                 minimap,
                 act_id,
@@ -468,9 +469,11 @@ class Actor_Critic(keras.Model):
             )
         grad = tape.gradient(ls, self.trainable_variables)
         with train_summary_writer.as_default():
-            tf.summary.scalar(
-                "batch/gradient_norm", tf.reduce_mean([tf.norm(g) for g in grad]), step
-            )
+            norm_tmp = [tf.norm(g) for g in grad]
+            tf.summary.scalar("batch/gradient_norm", tf.reduce_mean(norm_tmp), step)
+            tf.summary.scalar("batch/gradient_norm_max", tf.reduce_max(norm_tmp), step)
+            tf.summary.scalar("batch/gradient_norm_min", tf.reduce_min(norm_tmp), step)
+
         for g in grad:
             tf.debugging.check_numerics(g, "Bad grad {}".format(g))
         # clip grad (https://arxiv.org/pdf/1211.5063.pdf)
