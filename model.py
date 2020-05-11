@@ -28,8 +28,8 @@ class GLU(keras.Model):
 class Actor_Critic(keras.Model):
     def __init__(self):
         super(Actor_Critic, self).__init__(name="ActorCritic")
-        self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
-        # self.optimizer = keras.optimizers.Adam(learning_rate=3e-4)
+        # self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
+        self.optimizer = keras.optimizers.Adam(learning_rate=3e-5)
         self.clip_ratio = 0.3
         self.clip_value = 0.5
         self.v_coef = 0.5
@@ -55,11 +55,11 @@ class Actor_Critic(keras.Model):
             32, 1, padding="same", activation="relu", name="embed_minimap"
         )
         self.embed_minimap_2 = keras.layers.Conv2D(
+            32, 3, padding="same", activation="relu"
+        )
+        self.embed_minimap_3 = keras.layers.Conv2D(
             64, 3, padding="same", activation="relu"
         )
-        # self.embed_minimap_3 = keras.layers.Conv2D(
-        #     128, 3, 2, padding="same", activation="relu"
-        # )
         # screen feature
         # self.embed_screen = keras.layers.Conv2D(32,
         #                                         1,
@@ -158,6 +158,8 @@ class Actor_Critic(keras.Model):
         one_hot_minimap = tf.stop_gradient(one_hot_map(minimap))
         embed_minimap = self.embed_minimap(one_hot_minimap)
         embed_minimap = self.embed_minimap_2(embed_minimap)
+        embed_minimap = self.embed_minimap_3(embed_minimap)
+
         if step is not None:
             with train_summary_writer.as_default():
                 tf.summary.image(
@@ -244,10 +246,6 @@ class Actor_Critic(keras.Model):
         """Sample actions and compute logp(a|s)"""
         out = self.call(player, available_act, minimap, training=False)
 
-        # for key in out:
-        #     if key != "value" and key != "action_id":
-        #         out[key] = tf.nn.log_softmax(out[key], axis=-1)
-
         # EPS is used to avoid log(0) =-inf
         prob_act = tf.math.softmax(out["action_id"]) * available_act
         # renormalize
@@ -261,10 +259,7 @@ class Actor_Critic(keras.Model):
         # Fill out args based on sampled action type
         arg_spatial = []
         arg_nonspatial = []
-        # logp_a = tf.reduce_sum(
-        #     out["action_id"] * tf.one_hot(action_id, depth=NUM_ACTION_FUNCTIONS),
-        #     axis=-1,
-        # )
+
         logp_a = log_prob(tf.squeeze(action_id, axis=-1), out["action_id"])
         tf.debugging.check_numerics(
             logp_a,
@@ -277,15 +272,6 @@ class Actor_Critic(keras.Model):
             if arg_type.name in ["screen", "screen2", "minimap"]:
                 location_id = tf.random.categorical(out["target_location"], 1)
                 arg_spatial.append(location_id)
-
-                # logp_a += tf.reduce_sum(
-                #     out["target_location"]
-                #     * tf.one_hot(
-                #         location_id,
-                #         depth=self.location_out_width * self.location_out_height,
-                #     ),
-                #     axis=-1,
-                # )
                 logp_a += log_prob(
                     tf.squeeze(location_id, axis=-1), out["target_location"]
                 )
@@ -293,10 +279,6 @@ class Actor_Critic(keras.Model):
                 # non-spatial args
                 sample = tf.random.categorical(out[arg_type.name], 1)
                 arg_nonspatial.append(sample)
-                # logp_a += tf.reduce_sum(
-                #     out[arg_type.name] * tf.one_hot(sample, depth=arg_type.sizes[0]),
-                #     axis=-1,
-                # )
                 logp_a += log_prob(tf.squeeze(sample, axis=-1), out[arg_type.name])
         tf.debugging.check_numerics(logp_a, "Bad logp(a|s)")
 
@@ -313,24 +295,10 @@ class Actor_Critic(keras.Model):
         logp(a|s) = log (p1*p2*p3) = logp1 + logp2 + logp3
 
         """
-
-        # # from logits to logp
-        # logp_pi = {}
-        # for key in pi:
-        #     if key != "value":
-        #         logp_pi[key] = tf.nn.log_softmax(pi[key], axis=-1)
-
         # action function id prob
         assert len(pi["action_id"].shape) == 2
         logp = log_prob(action_ids, pi["action_id"])
 
-        # pi_act = tf.nn.softmax(pi["action_id"]) * available_act
-        # pi_act /= tf.reduce_sum(pi_act, axis=-1, keepdims=True)
-        # logpi_act = tf.math.log(tf.maximum(pi_act, EPS))
-        # logp = tf.reduce_sum(
-        #     logpi_act * tf.one_hot(action_ids, depth=NUM_ACTION_FUNCTIONS), axis=-1,
-        # )
-        # args
         assert len(action_args.shape) == 2
         for arg_type in actions.TYPES:
             if arg_type.name in ["screen", "screen2", "minimap"]:
@@ -338,38 +306,12 @@ class Actor_Critic(keras.Model):
                     action_args[:, arg_type.id], pi["target_location"]
                 )
                 logp += action_log_prob * action_mask[:, arg_type.id]
-                # logp_pi = tf.nn.log_softmax(pi["target_location"], axis=-1)
-                # tf.debugging.check_numerics(logp_pi, "Bad logp(a|s)")
-
-                # logp += (
-                #     tf.reduce_sum(
-                #         logp_pi
-                #         * tf.one_hot(
-                #             action_args[:, arg_type.id], depth=MINIMAP_RES * MINIMAP_RES
-                #         ),
-                #         axis=-1,
-                #     )
-                #     * action_mask[:, arg_type.id]
-                # )
 
             if arg_type.name in pi.keys():
                 action_log_prob = log_prob(
                     action_args[:, arg_type.id], pi[arg_type.name]
                 )
                 logp += action_log_prob * action_mask[:, arg_type.id]
-                # logp_pi = tf.nn.log_softmax(pi[arg_type.name], axis=-1)
-                # tf.debugging.check_numerics(logp_pi, "Bad logp(a|s)")
-
-                # logp += (
-                #     tf.reduce_sum(
-                #         logp_pi
-                #         * tf.one_hot(
-                #             action_args[:, arg_type.id], depth=np.prod(arg_type.sizes),
-                #         ),
-                #         axis=-1,
-                #     )
-                #     * action_mask[:, arg_type.id]
-                # )
 
         return logp
 

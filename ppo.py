@@ -113,7 +113,7 @@ def train(
         map_name=env_name,
         players=[sc2_env.Agent(sc2_env.Race.random)],
         agent_interface_format=sc2_env.parse_agent_interface_format(
-            feature_minimap=MINIMAP_RES, feature_screen=MINIMAP_RES
+            feature_minimap=MINIMAP_RES, feature_screen=1
         ),
         step_mul=FLAGS.step_mul,
         game_steps_per_episode=FLAGS.game_steps_per_episode,
@@ -293,7 +293,7 @@ def train(
 def main(argv):
     epochs = 1000
     batch_size = 480
-    minibatch_size = 32
+    minibatch_size = 48
     train(
         FLAGS.env_name,
         batch_size,
