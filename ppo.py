@@ -2,16 +2,21 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+import tensorflow as tf
+
+gpus = tf.config.experimental.list_physical_devices("GPU")
+tf.config.experimental.set_memory_growth(gpus[0], True)
+
 
 from buffer import Buffer
 from model import Actor_Critic
 from utils import indToXY, XYToInd, explained_variance
 from constants import *
-from log import train_summary_writer, saved_model_dir
+from log import train_summary_writer, saved_model_dir, hp_summary_dir
+from hparams import *
+import random
 
-import tensorflow as tf
 from tensorflow import keras
-import tensorboard as tb
 import numpy as np
 from absl import app, flags
 import sys
@@ -89,7 +94,15 @@ def translateActionToSC2(arg_spatial, arg_nonspatial, width, height):
 
 # run one policy update
 def train(
-    env_name, batch_size, minibatch_size, epochs, save_model=False, load_path=None
+    env_name,
+    batch_size,
+    minibatch_size,
+    updates,
+    epochs,
+    hparam,
+    hp_summary_writer,
+    save_model=False,
+    load_path=None,
 ):
     """
     Main learning function
@@ -99,7 +112,7 @@ def train(
         minibatch_size: one batch is seperated into several minibatches. Each has this size.
         epochs: in one epoch, buffer is fully filled, and trained multiple times with minibatches.
     """
-    actor_critic = Actor_Critic()
+    actor_critic = Actor_Critic(hparam)
 
     if load_path is not None:
         print("Loading model ...")
@@ -121,7 +134,7 @@ def train(
     ) as env:
         actor_critic.set_act_spec(env.action_spec()[0])  # assume one agent
 
-        def train_one_epoch(step, tracing_on):
+        def train_one_update(step, epochs, tracing_on):
             # initialize replay buffer
             buffer = Buffer(
                 batch_size,
@@ -175,7 +188,7 @@ def train(
 
                 if step_type == step_type.LAST or buffer.is_full():
                     if step_type == step_type.LAST:
-                        buffer.finalize(reward)
+                        buffer.finalize(0)
                     else:
                         # trajectory is cut off, bootstrap last state with estimated value
                         tf_obs = (
@@ -200,33 +213,13 @@ def train(
 
             # train in minibatches
             buffer.post_process()
-            buffer.shuffle()
 
             mb_loss = []
-            for ind in range(batch_size // minibatch_size):
-                (
-                    player,
-                    # home_away_race,
-                    # upgrades,
-                    available_act,
-                    minimap,
-                    act_id,
-                    act_args,
-                    act_mask,
-                    logp,
-                    val,
-                    ret,
-                    adv,
-                ) = buffer.minibatch(ind)
+            for ep in range(epochs):
+                buffer.shuffle()
 
-                assert ret.shape == val.shape
-                assert logp.shape == adv.shape
-                if tracing_on:
-                    tf.summary.trace_on(graph=True, profiler=False)
-
-                mb_loss.append(
-                    actor_critic.train_step(
-                        tf.constant(step, dtype=tf.int64),
+                for ind in range(batch_size // minibatch_size):
+                    (
                         player,
                         # home_away_race,
                         # upgrades,
@@ -239,14 +232,36 @@ def train(
                         val,
                         ret,
                         adv,
-                    )
-                )
-                step += 1
+                    ) = buffer.minibatch(ind)
 
-                if tracing_on:
-                    tracing_on = False
-                    with train_summary_writer.as_default():
-                        tf.summary.trace_export(name="train_step", step=0)
+                    assert ret.shape == val.shape
+                    assert logp.shape == adv.shape
+                    if tracing_on:
+                        tf.summary.trace_on(graph=True, profiler=False)
+
+                    mb_loss.append(
+                        actor_critic.train_step(
+                            tf.constant(step, dtype=tf.int64),
+                            player,
+                            # home_away_race,
+                            # upgrades,
+                            available_act,
+                            minimap,
+                            act_id,
+                            act_args,
+                            act_mask,
+                            logp,
+                            val,
+                            ret,
+                            adv,
+                        )
+                    )
+                    step += 1
+
+                    if tracing_on:
+                        tracing_on = False
+                        with train_summary_writer.as_default():
+                            tf.summary.trace_export(name="train_step", step=0)
 
             batch_loss = np.mean(mb_loss)
 
@@ -257,14 +272,14 @@ def train(
                 np.asarray(buffer.batch_vals, dtype=np.float32),
             )
 
-        num_train_per_epoch = batch_size // minibatch_size
-        for i in range(epochs):
+        num_train_per_update = epochs * (batch_size // minibatch_size)
+        for i in range(updates):
             if i == 0:
                 tracing_on = True
             else:
                 tracing_on = False
-            batch_loss, cumulative_rew, batch_ret, batch_vals = train_one_epoch(
-                i * num_train_per_epoch, tracing_on
+            batch_loss, cumulative_rew, batch_ret, batch_vals = train_one_update(
+                i * num_train_per_update, epochs, tracing_on
             )
             ev = explained_variance(batch_vals, batch_ret)
             with train_summary_writer.as_default():
@@ -273,6 +288,8 @@ def train(
                 )
                 tf.summary.scalar("batch/ev", ev, step=i)
                 tf.summary.scalar("loss/batch_loss", batch_loss, step=i)
+            with hp_summary_writer.as_default():
+                tf.summary.scalar("rewards", np.mean(cumulative_rew), step=i)
             print("----------------------------")
             print(
                 "epoch {0:2d} loss {1:.3f} batch_ret {2:.3f}".format(
@@ -291,17 +308,46 @@ def train(
 
 
 def main(argv):
-    epochs = 1000
-    batch_size = 480
-    minibatch_size = 48
-    train(
-        FLAGS.env_name,
-        batch_size,
-        minibatch_size,
-        epochs,
-        save_model=FLAGS.save_model,
-        load_path=FLAGS.load_model_path,
-    )
+    updates = 100  # updates=total_timestep // batch_size. Also means the times to collect trajectory
+    epochs = 4  # number of optimizations on the same batch
+    batch_size = 512  # trajectory size
+    minibatch_size = 128  # factor of batch_size. Chop batch_size into minisize
+
+    with tf.summary.create_file_writer(hp_summary_dir).as_default():
+        hp.hparams_config(
+            hparams=[HP_LR, HP_CLIP, HP_ENTROPY_COEF, HP_GRADIENT_NORM],
+            metrics=[hp.Metric("rewards", display_name="rewards")],
+        )
+
+    times = 0
+    for times in range(10):
+        lr = random.choice(HP_LR.domain.values)
+        clip = random.choice(HP_CLIP.domain.values)
+        ent_coef = random.choice(HP_ENTROPY_COEF.domain.values)
+        grad_norm = random.choice(HP_GRADIENT_NORM.domain.values)
+        hparams = {
+            HP_LR: lr,
+            HP_CLIP: clip,
+            HP_ENTROPY_COEF: ent_coef,
+            HP_GRADIENT_NORM: grad_norm,
+        }
+        hp_summary_writer = tf.summary.create_file_writer(
+            hp_summary_dir + "/run-{}".format(times)
+        )
+        with hp_summary_writer.as_default():
+            hp.hparams(hparams)
+        train(
+            FLAGS.env_name,
+            batch_size,
+            minibatch_size,
+            updates,
+            epochs,
+            hparams,
+            hp_summary_writer,
+            save_model=FLAGS.save_model,
+            load_path=FLAGS.load_model_path,
+        )
+        times += 1
 
 
 if __name__ == "__main__":

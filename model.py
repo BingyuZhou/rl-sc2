@@ -4,6 +4,7 @@ import numpy as np
 from utils import indToXY, XYToInd, compute_over_actions, entropy, log_prob
 from constants import *
 from log import train_summary_writer
+from hparams import *
 
 from pysc2.lib import features, actions
 
@@ -26,20 +27,21 @@ class GLU(keras.Model):
 
 
 class Actor_Critic(keras.Model):
-    def __init__(self):
+    def __init__(self, hparam):
         super(Actor_Critic, self).__init__(name="ActorCritic")
         # self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
-        self.optimizer = keras.optimizers.Adam(learning_rate=3e-5)
-        self.clip_ratio = 0.3
-        self.clip_value = 0.5
+        print(hparam)
+        self.optimizer = keras.optimizers.Adam(learning_rate=hparam[HP_LR])
+        self.clip_ratio = hparam[HP_CLIP]
+        self.clip_value = 0
         self.v_coef = 0.5
-        self.entropy_coef = 1e-2
-        self.max_grad_norm = 0.5
+        self.entropy_coef = hparam[HP_ENTROPY_COEF]
+        self.max_grad_norm = hparam[HP_GRADIENT_NORM]
 
         # upgrades
-        self.embed_upgrads = keras.layers.Dense(
-            64, activation="relu", name="embed_upgrads"
-        )
+        # self.embed_upgrads = keras.layers.Dense(
+        #     64, activation="relu", name="embed_upgrads"
+        # )
         # player (agent statistics)
         self.embed_player = keras.layers.Dense(
             64, activation="relu", name="embed_player"
@@ -49,17 +51,17 @@ class Actor_Critic(keras.Model):
             64, activation="relu", name="embed_available_act"
         )
         # race_requested
-        self.embed_race = keras.layers.Dense(64, activation="relu", name="embed_race")
+        # self.embed_race = keras.layers.Dense(64, activation="relu", name="embed_race")
         # minimap feature
         self.embed_minimap = keras.layers.Conv2D(
             32, 1, padding="same", activation="relu", name="embed_minimap"
         )
         self.embed_minimap_2 = keras.layers.Conv2D(
-            32, 3, padding="same", activation="relu"
-        )
-        self.embed_minimap_3 = keras.layers.Conv2D(
             64, 3, padding="same", activation="relu"
         )
+        # self.embed_minimap_3 = keras.layers.Conv2D(
+        #     64, 3, padding="same", activation="relu"
+        # )
         # screen feature
         # self.embed_screen = keras.layers.Conv2D(32,
         #                                         1,
@@ -158,7 +160,7 @@ class Actor_Critic(keras.Model):
         one_hot_minimap = tf.stop_gradient(one_hot_map(minimap))
         embed_minimap = self.embed_minimap(one_hot_minimap)
         embed_minimap = self.embed_minimap_2(embed_minimap)
-        embed_minimap = self.embed_minimap_3(embed_minimap)
+        # embed_minimap = self.embed_minimap_3(embed_minimap)
 
         if step is not None:
             with train_summary_writer.as_default():
@@ -168,12 +170,12 @@ class Actor_Critic(keras.Model):
                     step=step,
                     max_outputs=5,
                 )
-                tf.summary.image(
-                    "input_minimap",
-                    one_hot_minimap[:, :, :, 29:30],
-                    step=step,
-                    max_outputs=5,
-                )
+                # tf.summary.image(
+                #     "input_minimap",
+                #     one_hot_minimap[:, :, :, 29:30],
+                #     step=step,
+                #     max_outputs=5,
+                # )
         # embed_minimap = self.embed_minimap_2(embed_minimap)
         # embed_minimap = self.embed_minimap_3(embed_minimap)
 
@@ -346,13 +348,16 @@ class Actor_Critic(keras.Model):
 
         pg_loss = -tf.reduce_mean(tf.minimum(pg_loss_1, pg_loss_2))
 
-        v_clip = old_v + tf.clip_by_value(
-            out["value"] - old_v, -self.clip_value, self.clip_value
-        )
-        v_clip_loss = tf.square(v_clip - ret)
+        if self.clip_value > 0:
+            v_clip = old_v + tf.clip_by_value(
+                out["value"] - old_v, -self.clip_value, self.clip_value
+            )
+            v_clip_loss = tf.square(v_clip - ret)
 
-        v_loss = tf.square(out["value"] - ret)
-        v_loss = tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
+            v_loss = tf.square(out["value"] - ret)
+            v_loss = tf.reduce_mean(tf.maximum(v_clip_loss, v_loss))
+        else:
+            v_loss = tf.reduce_mean(tf.square(out["value"] - ret))
 
         approx_entropy = tf.reduce_mean(
             compute_over_actions(entropy, out, available_act, act_mask), name="entropy"

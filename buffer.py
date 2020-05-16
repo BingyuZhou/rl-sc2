@@ -114,16 +114,15 @@ class Buffer:
 
     def finalize(self, last_val):
         """Finalize one trajectory"""
-        self.ep_rew.append(last_val)
-        self.ep_vals.append(last_val)
+        self.ep_vals.append(last_val)  # bootstrap
         # GAE
         # A(s,a) = r(s,a) + \gamma * v(s') - v(s)
         self.ep_rew = np.asarray(self.ep_rew, dtype="float32")
         self.ep_vals = np.asarray(self.ep_vals, dtype="float32")
-        deltas = self.ep_rew[:-1] + self.gamma * self.ep_vals[1:] - self.ep_vals[:-1]
+        deltas = self.ep_rew + self.gamma * self.ep_vals[1:] - self.ep_vals[:-1]
         self.batch_adv.append(discount_cumsum(deltas, self.gamma * self.lam))
 
-        self.batch_ret.append(discount_cumsum(self.ep_rew, self.gamma)[:-1])
+        self.batch_ret.append(discount_cumsum(self.ep_rew, self.gamma))
 
         self.batch_len.append(self.ep_len)
 
