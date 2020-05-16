@@ -33,7 +33,7 @@ class Actor_Critic(keras.Model):
         print(hparam)
         self.optimizer = keras.optimizers.Adam(learning_rate=hparam[HP_LR])
         self.clip_ratio = hparam[HP_CLIP]
-        self.clip_value = 0
+        self.clip_value = hparam[HP_CLIP_VALUE]
         self.v_coef = 0.5
         self.entropy_coef = hparam[HP_ENTROPY_COEF]
         self.max_grad_norm = hparam[HP_GRADIENT_NORM]
@@ -57,7 +57,7 @@ class Actor_Critic(keras.Model):
             32, 1, padding="same", activation="relu", name="embed_minimap"
         )
         self.embed_minimap_2 = keras.layers.Conv2D(
-            64, 3, padding="same", activation="relu"
+            64, 2, padding="same", activation="relu"
         )
         # self.embed_minimap_3 = keras.layers.Conv2D(
         #     64, 3, padding="same", activation="relu"
@@ -263,12 +263,6 @@ class Actor_Critic(keras.Model):
         arg_nonspatial = []
 
         logp_a = log_prob(tf.squeeze(action_id, axis=-1), out["action_id"])
-        tf.debugging.check_numerics(
-            logp_a,
-            "Bad logp(a|s) {0}\n {1}\n {2}".format(
-                action_id, available_act[:, action_id.numpy().item()], out["action_id"]
-            ),
-        )
 
         for arg_type in self.action_spec.functions[action_id.numpy().item()].args:
             if arg_type.name in ["screen", "screen2", "minimap"]:
@@ -282,7 +276,7 @@ class Actor_Critic(keras.Model):
                 sample = tf.random.categorical(out[arg_type.name], 1)
                 arg_nonspatial.append(sample)
                 logp_a += log_prob(tf.squeeze(sample, axis=-1), out[arg_type.name])
-        tf.debugging.check_numerics(logp_a, "Bad logp(a|s)")
+        # tf.debugging.check_numerics(logp_a, "Bad logp(a|s)")
 
         return (
             out["value"],
@@ -300,6 +294,8 @@ class Actor_Critic(keras.Model):
         # action function id prob
         assert len(pi["action_id"].shape) == 2
         logp = log_prob(action_ids, pi["action_id"])
+
+        # tf.debugging.assert_shapes([(logp, (128,))])
 
         assert len(action_args.shape) == 2
         for arg_type in actions.TYPES:
@@ -362,6 +358,7 @@ class Actor_Critic(keras.Model):
         approx_entropy = tf.reduce_mean(
             compute_over_actions(entropy, out, available_act, act_mask), name="entropy"
         )
+        tf.debugging.check_numerics(approx_entropy, "bad entropy")
         approx_kl = tf.reduce_mean(tf.square(old_logp - logp), name="kl")
         clip_frac = tf.reduce_mean(
             tf.cast(tf.greater(tf.abs(delta_pi - 1.0), self.clip_ratio), tf.float32),
@@ -394,9 +391,9 @@ class Actor_Critic(keras.Model):
         ret,
         adv,
     ):
-        tf.debugging.check_numerics(old_logp, "Bad old_logp")
-        tf.debugging.check_numerics(old_v, "Bad old_v")
-        tf.debugging.check_numerics(adv, "Bad adv")
+        # tf.debugging.check_numerics(old_logp, "Bad old_logp")
+        # tf.debugging.check_numerics(old_v, "Bad old_v")
+        # tf.debugging.check_numerics(adv, "Bad adv")
 
         with tf.GradientTape() as tape:
             ls = self.loss(
@@ -419,7 +416,6 @@ class Actor_Critic(keras.Model):
             norm_tmp = [tf.norm(g) for g in grad]
             tf.summary.scalar("batch/gradient_norm", tf.reduce_mean(norm_tmp), step)
             tf.summary.scalar("batch/gradient_norm_max", tf.reduce_max(norm_tmp), step)
-            tf.summary.scalar("batch/gradient_norm_min", tf.reduce_min(norm_tmp), step)
 
         for g in grad:
             tf.debugging.check_numerics(g, "Bad grad {}".format(g))

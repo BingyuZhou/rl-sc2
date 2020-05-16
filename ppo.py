@@ -320,14 +320,16 @@ def main(argv):
         )
 
     times = 0
-    for times in range(10):
+    for times in range(1):
         lr = random.choice(HP_LR.domain.values)
         clip = random.choice(HP_CLIP.domain.values)
+        clip_v = random.choice(HP_CLIP_VALUE.domain.values)
         ent_coef = random.choice(HP_ENTROPY_COEF.domain.values)
         grad_norm = random.choice(HP_GRADIENT_NORM.domain.values)
         hparams = {
             HP_LR: lr,
             HP_CLIP: clip,
+            HP_CLIP_VALUE: clip_v,
             HP_ENTROPY_COEF: ent_coef,
             HP_GRADIENT_NORM: grad_norm,
         }
