@@ -7,6 +7,7 @@ from utils import (
     compute_over_actions,
     entropy,
     log_prob,
+    gumbel_sample,
 )
 from constants import *
 from log import train_summary_writer
@@ -98,7 +99,6 @@ class Actor_Critic(keras.Model):
         """
         Output
         """
-        # TODO: autoregressive embedding
         self.action_id_layer = keras.layers.Dense(
             NUM_ACTION_FUNCTIONS, name="action_id_out"
         )
@@ -277,13 +277,7 @@ class Actor_Critic(keras.Model):
 
         # action_id = tf.random.categorical(log_prob_act, 1)
         # Gumbel-max sampling
-        noise = tf.random.uniform(
-            tf.shape(out["action_id"]), dtype=out["action_id"].dtype
-        )
-        prob = out["action_id"] - tf.math.log(-tf.math.log(noise))
-        available_act_mask_2 = tf.where(available_act_mask > 0, 0.0, -np.inf)
-        prob += available_act_mask_2  # FIXME
-        action_id = tf.argmax(prob, axis=-1)
+        action_id = gumbel_sample(out["action_id"], available_act_mask)
 
         # while tf.less_equal(available_act_mask[:, action_id.numpy().item()], -1.0):
         #     action_id = tf.random.categorical(log_prob_act, 1)
@@ -298,16 +292,14 @@ class Actor_Critic(keras.Model):
 
         for arg_type in self.action_spec.functions[action_id.numpy().item()].args:
             if arg_type.name in ["screen", "screen2", "minimap"]:
-                location_id = tf.random.categorical(out["target_location"], 1)
+                location_id = gumbel_sample(out["target_location"])
                 arg_spatial.append(location_id)
-                logp_a += log_prob(
-                    tf.squeeze(location_id, axis=-1), out["target_location"]
-                )
+                logp_a += log_prob(location_id, out["target_location"])
             else:
                 # non-spatial args
-                sample = tf.random.categorical(out[arg_type.name], 1)
+                sample = gumbel_sample(out[arg_type.name])
                 arg_nonspatial.append(sample)
-                logp_a += log_prob(tf.squeeze(sample, axis=-1), out[arg_type.name])
+                logp_a += log_prob(sample, out[arg_type.name])
         # tf.debugging.check_numerics(logp_a, "Bad logp(a|s)")
 
         return (

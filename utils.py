@@ -81,3 +81,18 @@ def explained_variance(ypred, y):
 
 def log_prob(label, logits):
     return -tf.nn.sparse_softmax_cross_entropy_with_logits(label, logits)
+
+
+def gumbel_sample(logits, mask=None):
+    """Gumbel max sample
+
+    Args:
+        mask: boolen mask. 1 means valid, 0 means invalid.
+    """
+
+    noise = tf.random.uniform(tf.shape(logits), dtype=logits.dtype)
+    prob = logits - tf.math.log(-tf.math.log(noise))
+    if mask is not None:
+        mask_2 = tf.where(mask > 0, 0.0, -np.inf)
+        prob += mask_2  # FIXME
+    return tf.argmax(prob, axis=-1)
