@@ -8,6 +8,7 @@ from utils import (
     entropy,
     log_prob,
     gumbel_sample,
+    categorical_sample,
 )
 from constants import *
 from log import train_summary_writer
@@ -46,9 +47,7 @@ class Actor_Critic(keras.Model):
         super(Actor_Critic, self).__init__(name="ActorCritic")
         # self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
         print(hparam)
-        self.optimizer = keras.optimizers.Adam(
-            learning_rate=hparam[HP_LR], epsilon=1e-5
-        )
+        self.optimizer = keras.optimizers.Adam(learning_rate=hparam[HP_LR])
         self.clip_ratio = hparam[HP_CLIP]
         self.clip_value = hparam[HP_CLIP_VALUE]
         self.v_coef = 0.1
@@ -218,8 +217,6 @@ class Actor_Critic(keras.Model):
         core_out = tf.concat([scalar_out_2d, embed_minimap], axis=-1, name="core")
         core_out_flat = self.flat(core_out)
         core_out_flat = self.core_fc(core_out_flat)
-        # core_out_flat = self.layer_norm(core_out_flat)
-        # core_out_flat = tf.nn.relu(core_out_flat)
 
         """
         Decision output
@@ -269,20 +266,10 @@ class Actor_Critic(keras.Model):
         """Sample actions and compute logp(a|s)"""
         out = self.call(player, available_act_mask, minimap)
 
-        # # EPS is used to avoid log(0) =-inf
-        # prob_act = tf.math.softmax(out["action_id"]) * available_act_mask
-        # # renormalize
-        # prob_act /= EPS + tf.reduce_sum(prob_act, axis=-1, keepdims=True)
-        # log_prob_act = tf.math.log(prob_act + EPS)
-
-        # action_id = tf.random.categorical(log_prob_act, 1)
         # Gumbel-max sampling
-        action_id = gumbel_sample(out["action_id"], available_act_mask)
+        action_id = categorical_sample(out["action_id"], available_act_mask)
 
-        # while tf.less_equal(available_act_mask[:, action_id.numpy().item()], -1.0):
-        #     action_id = tf.random.categorical(log_prob_act, 1)
-        #     print("------------------resample action id!--------------\n")
-        tf.assert_greater(available_act_mask[:, action_id.numpy().item()], -1.0)
+        tf.assert_greater(available_act_mask[:, action_id.numpy().item()], 0.0)
 
         # Fill out args based on sampled action type
         arg_spatial = []

@@ -96,3 +96,11 @@ def gumbel_sample(logits, mask=None):
         mask_2 = tf.where(mask > 0, 0.0, -np.inf)
         prob += mask_2  # FIXME
     return tf.argmax(prob, axis=-1)
+
+
+def categorical_sample(logits, mask=None):
+    prob_mask = tf.math.softmax(logits) * mask
+    # renormalize
+    prob_mask /= EPS + tf.reduce_sum(prob_mask, axis=-1, keepdims=True)
+    log_prob_act = tf.math.log(prob_mask)
+    return tf.squeeze(tf.random.categorical(log_prob_act, 1), axis=-1)
