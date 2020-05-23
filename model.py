@@ -1,16 +1,30 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
-from utils import indToXY, XYToInd, compute_over_actions, entropy, log_prob
+from utils import (
+    indToXY,
+    XYToInd,
+    compute_over_actions,
+    entropy,
+    log_prob,
+)
 from constants import *
 from log import train_summary_writer
 from hparams import *
 
 from pysc2.lib import features, actions
 
+"""
+Tow ways to handle available action：
+1. Manually apply available action mask at the end of action sampling step. Agent itself doesn't learn from the available action info.
+2. [DeepMind] Encoding available action into the model. Using GLU to learn which actions are available. No mask in the action sampling step.
+"""
+
 
 class GLU(keras.Model):
-    """Gated linear unit"""
+    """Gated linear unit
+    [DeepMind] method to learn which actions types are availble
+    """
 
     def __init__(self, input_size, out_size):
         super(GLU, self).__init__(name="GLU")
@@ -31,10 +45,12 @@ class Actor_Critic(keras.Model):
         super(Actor_Critic, self).__init__(name="ActorCritic")
         # self.optimizer = keras.optimizers.SGD(learning_rate=1e-4, momentum=0.95)
         print(hparam)
-        self.optimizer = keras.optimizers.Adam(learning_rate=hparam[HP_LR])
+        self.optimizer = keras.optimizers.Adam(
+            learning_rate=hparam[HP_LR], epsilon=1e-5
+        )
         self.clip_ratio = hparam[HP_CLIP]
         self.clip_value = hparam[HP_CLIP_VALUE]
-        self.v_coef = 0.5
+        self.v_coef = 0.1
         self.entropy_coef = hparam[HP_ENTROPY_COEF]
         self.max_grad_norm = hparam[HP_GRADIENT_NORM]
 
@@ -83,8 +99,10 @@ class Actor_Critic(keras.Model):
         Output
         """
         # TODO: autoregressive embedding
-        self.action_id_layer = keras.layers.Dense(256, name="action_id_out")
-        self.action_id_gate = GLU(input_size=256, out_size=NUM_ACTION_FUNCTIONS)
+        self.action_id_layer = keras.layers.Dense(
+            NUM_ACTION_FUNCTIONS, name="action_id_out"
+        )
+        # self.action_id_gate = GLU(input_size=256, out_size=NUM_ACTION_FUNCTIONS)
         # self.delay_logits = keras.layers.Dense(128, name="delay_out")
         self.queued_logits = keras.layers.Dense(2, name="queued_out")
         self.select_point_logits = keras.layers.Dense(4, name="select_point_out")
@@ -111,7 +129,6 @@ class Actor_Critic(keras.Model):
         available_act,
         minimap,
         step=None,
-        training=True,
     ):
         """
         Embedding of inputs
@@ -121,6 +138,10 @@ class Actor_Critic(keras.Model):
         
         These are embedding of scalar features
         """
+        player = tf.stop_gradient(player)
+        available_act = tf.stop_gradient(available_act)
+        minimap = tf.stop_gradient(minimap)
+
         embed_player = self.embed_player(tf.stop_gradient(tf.math.log(player + 1.0)))
 
         # embed_race = self.embed_race(
@@ -207,7 +228,7 @@ class Actor_Critic(keras.Model):
         value_out = self.value(core_out_flat)
         # action id
         action_id_out = self.action_id_layer(core_out_flat)
-        action_id_out = self.action_id_gate(action_id_out, embed_available_act)
+        # action_id_out = self.action_id_gate(action_id_out, embed_available_act)
         # delay
         # delay_out = self.delay_logits(core_out_flat)
 
@@ -244,25 +265,36 @@ class Actor_Critic(keras.Model):
 
         return out
 
-    def step(self, player, home_away_race, upgrades, available_act, minimap):
+    def step(self, player, home_away_race, upgrades, available_act_mask, minimap):
         """Sample actions and compute logp(a|s)"""
-        out = self.call(player, available_act, minimap, training=False)
+        out = self.call(player, available_act_mask, minimap)
 
-        # EPS is used to avoid log(0) =-inf
-        prob_act = tf.math.softmax(out["action_id"]) * available_act
-        # renormalize
-        prob_act /= EPS + tf.reduce_sum(prob_act, axis=-1, keepdims=True)
-        log_prob_act = tf.math.log(prob_act + EPS)
+        # # EPS is used to avoid log(0) =-inf
+        # prob_act = tf.math.softmax(out["action_id"]) * available_act_mask
+        # # renormalize
+        # prob_act /= EPS + tf.reduce_sum(prob_act, axis=-1, keepdims=True)
+        # log_prob_act = tf.math.log(prob_act + EPS)
 
-        action_id = tf.random.categorical(log_prob_act, 1)
-        while tf.less_equal(available_act[:, action_id.numpy().item()], 0.9):
-            action_id = tf.random.categorical(log_prob_act, 1)
+        # action_id = tf.random.categorical(log_prob_act, 1)
+        # Gumbel-max sampling
+        noise = tf.random.uniform(
+            tf.shape(out["action_id"]), dtype=out["action_id"].dtype
+        )
+        prob = out["action_id"] - tf.math.log(-tf.math.log(noise))
+        available_act_mask_2 = tf.where(available_act_mask > 0, 0.0, -np.inf)
+        prob += available_act_mask_2  # FIXME
+        action_id = tf.argmax(prob, axis=-1)
+
+        # while tf.less_equal(available_act_mask[:, action_id.numpy().item()], -1.0):
+        #     action_id = tf.random.categorical(log_prob_act, 1)
+        #     print("------------------resample action id!--------------\n")
+        tf.assert_greater(available_act_mask[:, action_id.numpy().item()], -1.0)
 
         # Fill out args based on sampled action type
         arg_spatial = []
         arg_nonspatial = []
 
-        logp_a = log_prob(tf.squeeze(action_id, axis=-1), out["action_id"])
+        logp_a = log_prob(action_id, out["action_id"])
 
         for arg_type in self.action_spec.functions[action_id.numpy().item()].args:
             if arg_type.name in ["screen", "screen2", "minimap"]:
@@ -286,18 +318,17 @@ class Actor_Critic(keras.Model):
             logp_a,
         )
 
-    def logp_a(self, action_ids, action_args, action_mask, available_act, pi):
+    def logp_a(self, action_ids, action_args, action_mask, available_act_mask, pi):
         """logp(a|s)
         logp(a|s) = log (p1*p2*p3) = logp1 + logp2 + logp3
 
         """
         # action function id prob
-        assert len(pi["action_id"].shape) == 2
+        # available_action_logits = apply_action_mask(pi["action_id"], available_act_mask)
         logp = log_prob(action_ids, pi["action_id"])
 
         # tf.debugging.assert_shapes([(logp, (128,))])
 
-        assert len(action_args.shape) == 2
         for arg_type in actions.TYPES:
             if arg_type.name in ["screen", "screen2", "minimap"]:
                 action_log_prob = log_prob(
@@ -329,7 +360,6 @@ class Actor_Critic(keras.Model):
         ret,
         adv,
     ):
-        # expection grad log
         out = self.call(player, available_act, minimap, step=step)
 
         # new pi(a|s)
@@ -341,7 +371,7 @@ class Actor_Critic(keras.Model):
         pg_loss_2 = (
             tf.clip_by_value(delta_pi, 1 - self.clip_ratio, 1 + self.clip_ratio) * adv
         )
-
+        # expection grad log
         pg_loss = -tf.reduce_mean(tf.minimum(pg_loss_1, pg_loss_2))
 
         if self.clip_value > 0:
@@ -368,7 +398,7 @@ class Actor_Critic(keras.Model):
         with train_summary_writer.as_default():
             tf.summary.scalar("loss/pg_loss", pg_loss, step)
             tf.summary.scalar("loss/v_loss", v_loss, step)
-            tf.summary.scalar("stat/approx_entropy", approx_entropy, step)
+            tf.summary.scalar("loss/approx_entropy", approx_entropy, step)
             tf.summary.scalar("stat/approx_kl", approx_kl, step)
             tf.summary.scalar("stat/clip_frac", clip_frac, step)
 
@@ -391,10 +421,6 @@ class Actor_Critic(keras.Model):
         ret,
         adv,
     ):
-        # tf.debugging.check_numerics(old_logp, "Bad old_logp")
-        # tf.debugging.check_numerics(old_v, "Bad old_v")
-        # tf.debugging.check_numerics(adv, "Bad adv")
-
         with tf.GradientTape() as tape:
             ls = self.loss(
                 step,

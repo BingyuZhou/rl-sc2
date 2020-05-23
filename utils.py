@@ -22,26 +22,36 @@ def count_vars(trainable_var):
     return sum([np.prod(var.shape.as_list()) for var in trainable_var])
 
 
-def entropy(policy_logits, is_masked=False):
-    policy = tf.nn.softmax(policy_logits)
-    log_policy = tf.nn.log_softmax(policy_logits)
-    ent = -tf.reduce_sum(policy * log_policy, axis=-1)
+def entropy(policy_logits, size=None):
+    a0 = policy_logits - tf.reduce_max(policy_logits, axis=-1, keepdims=True)
+    ea0 = tf.exp(a0)
+    z0 = tf.reduce_sum(ea0, axis=-1, keepdims=True)
+    p = ea0 / z0
+    ent = tf.reduce_sum(p * (tf.math.log(z0) - a0), axis=1)
     tf.debugging.check_numerics(ent, "bad orig ent")
     # normalize by actions available
-    normalized_ent = ent / tf.math.log(tf.cast(policy_logits.shape[-1], tf.float32))
+    if size is None:
+        normalized_ent = ent / tf.math.log(tf.cast(policy_logits.shape[-1], tf.float32))
+    else:
+        size = tf.stop_gradient(size)
+        normalized_ent = ent / tf.math.log(tf.cast(size, tf.float32))
 
-    tf.debugging.check_numerics(
-        normalized_ent, "bad entropy {0} {1}".format(log_policy, ent)
-    )
+    tf.debugging.check_numerics(normalized_ent, "bad entropy {}".format(ent))
 
     return normalized_ent
 
 
 def compute_over_actions(func, out_logits, available_act_mask, act_arg_mask):
     # action_id
-    policy_logits = out_logits["action_id"] * available_act_mask
+    # available_action_logits = apply_action_mask(
+    #     out_logits["action_id"], available_act_mask
+    # )
 
-    ent = func(policy_logits, is_masked=True)
+    # tf.debugging.assert_equal(
+    #     available_action_logits.shape, out_logits["action_id"].shape
+    # )
+
+    ent = func(out_logits["action_id"], size=tf.math.count_nonzero(available_act_mask),)
 
     for arg in actions.TYPES:
         if arg.name in out_logits.keys():

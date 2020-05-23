@@ -315,7 +315,7 @@ def main(argv):
 
     with tf.summary.create_file_writer(hp_summary_dir).as_default():
         hp.hparams_config(
-            hparams=[HP_LR, HP_CLIP, HP_ENTROPY_COEF, HP_GRADIENT_NORM],
+            hparams=[HP_LR, HP_CLIP, HP_CLIP_VALUE, HP_ENTROPY_COEF, HP_GRADIENT_NORM],
             metrics=[hp.Metric("rewards", display_name="rewards")],
         )
 
