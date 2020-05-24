@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
+
 from constants import EPS
 from pysc2.lib import actions
 
@@ -22,23 +23,46 @@ def count_vars(trainable_var):
     return sum([np.prod(var.shape.as_list()) for var in trainable_var])
 
 
-def entropy(policy_logits, size=None):
+def entropy_naive(logits, mask=None):
+    p = tf.nn.softmax(logits, axis=-1)
+    if mask is not None:
+        p *= mask
+        p /= tf.reduce_sum(p, axis=-1, keepdims=True)
+
+    logp = tf.math.log(p + EPS)
+    ent = -tf.reduce_sum(logp * p, axis=-1)
+    # normalize by actions available
+    if mask is None:
+        ent = ent / tf.math.log(tf.cast(logits.shape[-1], tf.float32))
+    else:
+        mask = tf.stop_gradient(mask)
+        ent = ent / tf.math.log(tf.cast(tf.math.count_nonzero(mask), tf.float32))
+
+    tf.debugging.check_numerics(ent, "bad entropy {}".format(ent))
+
+    return ent
+
+
+def entropy(policy_logits, mask=None):
     a0 = policy_logits - tf.reduce_max(policy_logits, axis=-1, keepdims=True)
     ea0 = tf.exp(a0)
     z0 = tf.reduce_sum(ea0, axis=-1, keepdims=True)
     p = ea0 / z0
+    if mask is not None:
+        p *= mask
     ent = tf.reduce_sum(p * (tf.math.log(z0) - a0), axis=1)
-    tf.debugging.check_numerics(ent, "bad orig ent")
     # normalize by actions available
-    if size is None:
-        normalized_ent = ent / tf.math.log(tf.cast(policy_logits.shape[-1], tf.float32))
-    else:
-        size = tf.stop_gradient(size)
-        normalized_ent = ent / tf.math.log(tf.cast(size, tf.float32))
+    # if mask is None:
+    #     ent = ent / tf.math.log(tf.cast(policy_logits.shape[-1], tf.float32))
+    # else:
+    #     mask = tf.stop_gradient(mask)
+    #     ent = ent / tf.math.log(
+    #         tf.cast(tf.math.count_nonzero(mask), tf.float32)
+    #     )
+    ent = ent / tf.math.log(tf.cast(policy_logits.shape[-1], tf.float32))
+    tf.debugging.check_numerics(ent, "bad entropy {}".format(ent))
 
-    tf.debugging.check_numerics(normalized_ent, "bad entropy {}".format(ent))
-
-    return normalized_ent
+    return ent
 
 
 def compute_over_actions(func, out_logits, available_act_mask, act_arg_mask):
@@ -51,7 +75,7 @@ def compute_over_actions(func, out_logits, available_act_mask, act_arg_mask):
     #     available_action_logits.shape, out_logits["action_id"].shape
     # )
 
-    ent = func(out_logits["action_id"], size=tf.math.count_nonzero(available_act_mask),)
+    ent = func(out_logits["action_id"], mask=available_act_mask)
 
     for arg in actions.TYPES:
         if arg.name in out_logits.keys():
@@ -98,9 +122,8 @@ def gumbel_sample(logits, mask=None):
     return tf.argmax(prob, axis=-1)
 
 
-def categorical_sample(logits, mask=None):
-    prob_mask = tf.math.softmax(logits) * mask
-    # renormalize
-    prob_mask /= EPS + tf.reduce_sum(prob_mask, axis=-1, keepdims=True)
-    log_prob_act = tf.math.log(prob_mask)
-    return tf.squeeze(tf.random.categorical(log_prob_act, 1), axis=-1)
+def categorical_sample(logits, mask=None, temp=None):
+    if mask is not None:
+        logits = tf.where(mask > 0, logits, -1e5)
+
+    return tf.squeeze(tf.random.categorical(logits, 1), axis=-1)

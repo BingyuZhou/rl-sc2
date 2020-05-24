@@ -6,6 +6,7 @@ from utils import (
     XYToInd,
     compute_over_actions,
     entropy,
+    entropy_naive,
     log_prob,
     gumbel_sample,
     categorical_sample,
@@ -50,7 +51,7 @@ class Actor_Critic(keras.Model):
         self.optimizer = keras.optimizers.Adam(learning_rate=hparam[HP_LR])
         self.clip_ratio = hparam[HP_CLIP]
         self.clip_value = hparam[HP_CLIP_VALUE]
-        self.v_coef = 0.1
+        self.v_coef = 0.5
         self.entropy_coef = hparam[HP_ENTROPY_COEF]
         self.max_grad_norm = hparam[HP_GRADIENT_NORM]
 
@@ -70,23 +71,21 @@ class Actor_Critic(keras.Model):
         # self.embed_race = keras.layers.Dense(64, activation="relu", name="embed_race")
         # minimap feature
         self.embed_minimap = keras.layers.Conv2D(
-            32, 1, padding="same", activation="relu", name="embed_minimap"
+            32, 2, padding="same", activation="relu"
         )
         self.embed_minimap_2 = keras.layers.Conv2D(
-            64, 2, padding="same", activation="relu"
+            64, 1, padding="same", activation="relu", name="embed_minimap"
         )
         # self.embed_minimap_3 = keras.layers.Conv2D(
         #     64, 3, padding="same", activation="relu"
         # )
         # screen feature
-        # self.embed_screen = keras.layers.Conv2D(32,
-        #                                         1,
-        #                                         padding='same',
-        #                                         activation=tf.nn.relu)
-        # self.embed_screen_2 = keras.layers.Conv2D(64,
-        #                                           3,
-        #                                           padding='same',
-        #                                           activation=tf.nn.relu)
+        # self.embed_screen = keras.layers.Conv2D(
+        #     32, 2, padding="same", activation=tf.nn.relu
+        # )
+        # self.embed_screen_2 = keras.layers.Conv2D(
+        #     64, 1, padding="same", activation=tf.nn.relu
+        # )
         # self.embed_screen_3 = keras.layers.Conv2D(128,
         #                                           3,
         #                                           padding='same',
@@ -98,10 +97,8 @@ class Actor_Critic(keras.Model):
         """
         Output
         """
-        self.action_id_layer = keras.layers.Dense(
-            NUM_ACTION_FUNCTIONS, name="action_id_out"
-        )
-        # self.action_id_gate = GLU(input_size=256, out_size=NUM_ACTION_FUNCTIONS)
+        self.action_id_layer = keras.layers.Dense(256, name="action_id_out")
+        self.action_id_gate = GLU(input_size=256, out_size=NUM_ACTION_FUNCTIONS)
         # self.delay_logits = keras.layers.Dense(128, name="delay_out")
         self.queued_logits = keras.layers.Dense(2, name="queued_out")
         self.select_point_logits = keras.layers.Dense(4, name="select_point_out")
@@ -123,10 +120,9 @@ class Actor_Critic(keras.Model):
     def call(
         self,
         player,
-        # home_away_race,
-        # upgrades,
         available_act,
         minimap,
+        # screen,
         step=None,
     ):
         """
@@ -169,6 +165,7 @@ class Actor_Critic(keras.Model):
                 if feature.type is features.FeatureType.CATEGORICAL:
                     one_hot = tf.one_hot(obs[:, :, :, ind], depth=feature.scale)
                 else:  # features.FeatureType.SCALAR
+                    # FIXME: different screen feature has different scaling
                     one_hot = (
                         tf.cast(obs[:, :, :, ind : ind + 1], dtype=tf.float32) / 255.0
                     )
@@ -180,7 +177,10 @@ class Actor_Critic(keras.Model):
         one_hot_minimap = tf.stop_gradient(one_hot_map(minimap))
         embed_minimap = self.embed_minimap(one_hot_minimap)
         embed_minimap = self.embed_minimap_2(embed_minimap)
-        # embed_minimap = self.embed_minimap_3(embed_minimap)
+
+        # one_hot_screen = tf.stop_gradient(one_hot_map(screen, screen_on=True))
+        # embed_screen = self.embed_screen(one_hot_screen)
+        # embed_screen = self.embed_screen_2(embed_screen)
 
         if step is not None:
             with train_summary_writer.as_default():
@@ -191,19 +191,11 @@ class Actor_Critic(keras.Model):
                     max_outputs=5,
                 )
                 # tf.summary.image(
-                #     "input_minimap",
-                #     one_hot_minimap[:, :, :, 29:30],
+                #     "embed_screen",
+                #     tf.transpose(embed_screen[2:3, :, :, :], (3, 1, 2, 0)),
                 #     step=step,
                 #     max_outputs=5,
                 # )
-        # embed_minimap = self.embed_minimap_2(embed_minimap)
-        # embed_minimap = self.embed_minimap_3(embed_minimap)
-
-        # one_hot_screen = one_hot_map(obs.feature_screen, screen_on=True)
-        # embed_screen = self.embed_screen(one_hot_screen)
-        # embed_screen = self.embed_screen_2(embed_screen)
-        # embed_screen = self.embed_screen_3(embed_screen)
-        # map_out = tf.concat([embed_minimap, embed_screen], axis=-1)
 
         # TODO: entities feature
         """
@@ -225,7 +217,7 @@ class Actor_Critic(keras.Model):
         value_out = self.value(core_out_flat)
         # action id
         action_id_out = self.action_id_layer(core_out_flat)
-        # action_id_out = self.action_id_gate(action_id_out, embed_available_act)
+        action_id_out = self.action_id_gate(action_id_out, embed_available_act)
         # delay
         # delay_out = self.delay_logits(core_out_flat)
 
@@ -241,12 +233,6 @@ class Actor_Critic(keras.Model):
         # target_unit_out = self.target_unit_logits(core_out_flat)
         # target location
         target_location_out = self.target_location_logits(core_out)
-        (
-            _,
-            self.location_out_width,
-            self.location_out_height,
-            _,
-        ) = target_location_out.shape
 
         target_location_out = self.target_location_flat(target_location_out)
 
@@ -279,12 +265,12 @@ class Actor_Critic(keras.Model):
 
         for arg_type in self.action_spec.functions[action_id.numpy().item()].args:
             if arg_type.name in ["screen", "screen2", "minimap"]:
-                location_id = gumbel_sample(out["target_location"])
+                location_id = categorical_sample(out["target_location"])
                 arg_spatial.append(location_id)
                 logp_a += log_prob(location_id, out["target_location"])
             else:
                 # non-spatial args
-                sample = gumbel_sample(out[arg_type.name])
+                sample = categorical_sample(out[arg_type.name])
                 arg_nonspatial.append(sample)
                 logp_a += log_prob(sample, out[arg_type.name])
         # tf.debugging.check_numerics(logp_a, "Bad logp(a|s)")
@@ -331,6 +317,7 @@ class Actor_Critic(keras.Model):
         # upgrades,
         available_act,
         minimap,
+        # screen,
         act_id,
         act_args,
         act_mask,
@@ -365,7 +352,7 @@ class Actor_Critic(keras.Model):
             v_loss = tf.reduce_mean(tf.square(out["value"] - ret))
 
         approx_entropy = tf.reduce_mean(
-            compute_over_actions(entropy, out, available_act, act_mask), name="entropy"
+            compute_over_actions(entropy, out, available_act, act_mask), name="entropy",
         )
         tf.debugging.check_numerics(approx_entropy, "bad entropy")
         approx_kl = tf.reduce_mean(tf.square(old_logp - logp), name="kl")
@@ -388,10 +375,9 @@ class Actor_Critic(keras.Model):
         self,
         step,
         player,
-        # home_away_race,
-        # upgrades,
         available_act,
         minimap,
+        # screen,
         act_id,
         act_args,
         act_mask,
@@ -404,10 +390,9 @@ class Actor_Critic(keras.Model):
             ls = self.loss(
                 step,
                 player,
-                # home_away_race,
-                # upgrades,
                 available_act,
                 minimap,
+                # screen,
                 act_id,
                 act_args,
                 act_mask,

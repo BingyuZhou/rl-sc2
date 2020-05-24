@@ -43,6 +43,7 @@ class Buffer:
         self.batch_upgrades = []
         self.batch_available_act = []
         self.batch_minimap = []
+        self.batch_screen = []
 
         self.batch_act_id = []  # batch action
         self.batch_act_args = []
@@ -76,6 +77,7 @@ class Buffer:
         upgrades,
         available_act,
         minimap,
+        # screen,
         act_id,
         act_args,
         act_mask,
@@ -88,6 +90,7 @@ class Buffer:
         self.batch_upgrades.append(upgrades)
         self.batch_available_act.append(available_act)
         self.batch_minimap.append(minimap)
+        # self.batch_screen.append(screen)
 
         self.batch_act_id.append(act_id)
         # reorder act_args so that its arguemnts order in increasing order
@@ -167,6 +170,7 @@ class Buffer:
             # tf.constant(np.asarray(self.batch_upgrades)[slices]),
             tf.constant(np.asarray(self.batch_available_act)[slices]),
             tf.constant(np.asarray(self.batch_minimap)[slices]),
+            # tf.constant(np.asarray(self.batch_screen)[slices]),
             tf.constant(np.asarray(self.batch_act_id)[slices], dtype=tf.int32),
             tf.constant(self.batch_act_args[slices], dtype=tf.int32),
             tf.constant(np.asarray(self.batch_act_masks)[slices]),

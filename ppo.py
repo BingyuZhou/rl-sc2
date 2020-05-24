@@ -65,6 +65,7 @@ def preprocess(obs):
     available_act_bool_vec[[4, 5]] = 0
 
     minimap_feature = np.moveaxis(obs.feature_minimap, 0, -1)  # NCWH -> NWHC
+    # screen_feature = np.moveaxis(obs.feature_screen, 0, -1)
 
     return (
         obs.player.astype("float32"),
@@ -72,6 +73,7 @@ def preprocess(obs):
         upgrades_bool_vec,
         available_act_bool_vec,
         minimap_feature,
+        # screen_feature,
     )
 
 
@@ -126,7 +128,7 @@ def train(
         map_name=env_name,
         players=[sc2_env.Agent(sc2_env.Race.random)],
         agent_interface_format=sc2_env.parse_agent_interface_format(
-            feature_minimap=MINIMAP_RES, feature_screen=1
+            feature_minimap=MINIMAP_RES, feature_screen=MINIMAP_RES
         ),
         step_mul=FLAGS.step_mul,
         game_steps_per_episode=FLAGS.game_steps_per_episode,
@@ -159,7 +161,6 @@ def train(
                     for each_obs in obs
                 )
 
-                # print("computing action ...")
                 val, act_id, arg_spatial, arg_nonspatial, logp_a = actor_critic.step(
                     *tf_obs
                 )
@@ -221,10 +222,9 @@ def train(
                 for ind in range(batch_size // minibatch_size):
                     (
                         player,
-                        # home_away_race,
-                        # upgrades,
                         available_act,
                         minimap,
+                        # screen,
                         act_id,
                         act_args,
                         act_mask,
@@ -243,10 +243,9 @@ def train(
                         actor_critic.train_step(
                             tf.constant(step, dtype=tf.int64),
                             player,
-                            # home_away_race,
-                            # upgrades,
                             available_act,
                             minimap,
+                            # screen,
                             act_id,
                             act_args,
                             act_mask,
@@ -311,7 +310,7 @@ def main(argv):
     updates = 100  # updates=total_timestep // batch_size. Also means the times to collect trajectory
     epochs = 4  # number of optimizations on the same batch
     batch_size = 512  # trajectory size
-    minibatch_size = 128  # factor of batch_size. Chop batch_size into minisize
+    minibatch_size = 64  # factor of batch_size. Chop batch_size into minisize
 
     with tf.summary.create_file_writer(hp_summary_dir).as_default():
         hp.hparams_config(
